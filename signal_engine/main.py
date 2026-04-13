@@ -41,7 +41,8 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware  # allows dashboard to call us
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
+from graph_router import router as graph_router
+app.include_router(graph_router)
 # Our own modules
 from config import DEMO_MODE
 from models.disruption_signal import DisruptionSignal

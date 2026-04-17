@@ -1,0 +1,4 @@
+nexusflow-ui/node_modules/
+nexusflow-ui/build/
+nexusflow-ui/dist/
+.env

@@ -1,0 +1,154 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-safe:    #16a34a;
+  --color-warning: #d97706;
+  --color-danger:  #dc2626;
+  --color-bg:      #0f172a;
+  --color-surface: #1e293b;
+  --color-border:  #334155;
+  --color-text:    #f1f5f9;
+  --color-muted:   #94a3b8;
+  --color-accent:  #3b82f6;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Hide cursor ONLY when custom cursor is active */
+body.custom-cursor-active * {
+  cursor: none !important;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: 'Inter', sans-serif;
+  overflow: hidden;
+}
+
+/* ── CUSTOM CURSOR ── */
+#custom-cursor {
+  width: 12px;
+  height: 12px;
+  background: #3b82f6;
+  border-radius: 50%;
+  position: fixed;
+  pointer-events: none;
+  z-index: 99999;
+  left: -100px;
+  top: -100px;
+  transform: translate(-50%, -50%);
+  transition: transform 0.1s ease, width 0.15s ease, height 0.15s ease, background 0.15s ease;
+}
+
+#cursor-ring {
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  border-radius: 50%;
+  position: fixed;
+  pointer-events: none;
+  z-index: 99998;
+  left: -100px;
+  top: -100px;
+  transform: translate(-50%, -50%);
+  transition: left 0.08s ease, top 0.08s ease, width 0.2s ease, height 0.2s ease, border-color 0.2s ease;
+}
+
+/* ── ANIMATIONS ── */
+@keyframes ping-slow {
+  0%, 100% { transform: scale(1); opacity: 0.7; }
+  50%       { transform: scale(2); opacity: 0; }
+}
+
+@keyframes slideInLeft {
+  from { transform: translateX(-32px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(32px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from { transform: translateY(14px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+@keyframes flashYellow {
+  0%, 100% { color: #f1f5f9; }
+  50%       { color: #fbbf24; text-shadow: 0 0 12px #fbbf2488; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+@keyframes pulseRed {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+}
+
+@keyframes scanline {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-4px); }
+}
+
+@keyframes borderGlow {
+  0%, 100% { border-color: #1e3a5f; }
+  50%       { border-color: #3b82f6; }
+}
+
+/* ── UTILITY CLASSES ── */
+.animate-ping-slow  { animation: ping-slow 2s ease-in-out infinite; }
+.animate-slide-left { animation: slideInLeft 0.4s ease forwards; }
+.animate-slide-right { animation: slideInRight 0.4s ease forwards; }
+.animate-fade-up    { animation: fadeInUp 0.45s ease forwards; }
+.animate-flash      { animation: flashYellow 0.5s ease 3; }
+.animate-float      { animation: float 3s ease-in-out infinite; }
+.animate-pulse-red  { animation: pulseRed 1.5s ease-in-out infinite; }
+
+.skeleton {
+  background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 6px;
+}
+
+/* ── LEAFLET OVERRIDES ── */
+.leaflet-container { background: #080f1e !important; }
+.leaflet-control-zoom a {
+  background: #1e293b !important;
+  color: #f1f5f9 !important;
+  border-color: #334155 !important;
+}
+.leaflet-popup-content-wrapper {
+  background: #1e293b;
+  color: #f1f5f9;
+  border: 1px solid #334155;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6) !important;
+}
+.leaflet-popup-tip { background: #1e293b; }
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: #0f172a; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+/* ── FORCE GRAPH CANVAS ── */
+.force-graph-container canvas { border-radius: 0; }

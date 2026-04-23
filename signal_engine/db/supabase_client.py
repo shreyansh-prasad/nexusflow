@@ -63,7 +63,7 @@ async def insert_disruption_event(signal: DisruptionSignal) -> str | None:
         # is synchronous (blocking) but our app is async.
         # Think of it as: "Run this slow task in a side room
         #  so the main room stays free."
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,                                          # use default thread pool
             lambda: _supabase.table("disruption_events")  # pick the table
@@ -106,7 +106,7 @@ async def is_duplicate(signal: DisruptionSignal, window_hours: int = 2) -> bool:
         # Calculate the cutoff time: now minus 2 hours
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,
             lambda: _supabase.table("disruption_events")
@@ -140,7 +140,7 @@ async def get_disruption_history(limit: int = 10) -> list[dict]:
     Used by the GET /api/disruptions/history endpoint.
     """
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,
             lambda: _supabase.table("disruption_events")

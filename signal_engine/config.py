@@ -1,71 +1,76 @@
 # ============================================================
-# config.py
+# config.py — NexusFlow Signal Engine (merged Person A + B)
 # ============================================================
-# What is this file?
-#   Think of this like a "settings drawer" for your entire app.
-#   All secret passwords (API keys) live in a file called .env
-#   (which you NEVER upload to GitHub). This file opens that
-#   drawer and hands the keys to whoever needs them.
-#
-# Why do we do it this way?
-#   If you hardcode "my_password_123" inside your Python code
-#   and push it to GitHub, the whole world can see it and use
-#   your API for free (costing you money). Using .env keeps
-#   secrets secret.
+# Loads environment variables from .env (in signal_engine/).
+# SUPABASE_URL and SUPABASE_KEY are REQUIRED — crash if missing.
+# All other API keys are OPTIONAL — if absent, DEMO_MODE activates.
 # ============================================================
 
-import os                      # os lets Python talk to the computer's file system
-from dotenv import load_dotenv # load_dotenv reads the .env file for us
+import os
+import logging
+from dotenv import load_dotenv
 
-# This one line reads every line in .env and loads it into
-# the program's memory so os.getenv() can find them.
-load_dotenv()
+# Load .env from the same directory as this config.py file
+# (so it works regardless of where uvicorn is launched from)
+_HERE = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(dotenv_path=os.path.join(_HERE, ".env"))
 
-# ── API Keys ─────────────────────────────────────────────────
-# os.getenv("NAME") goes and fetches the value we stored in .env
-# If the value is missing it raises an error with a helpful message.
+logger = logging.getLogger(__name__)
+
 
 def _require(name: str) -> str:
-    """Helper: fetch an env var or crash with a clear message."""
-    value = os.getenv(name)
+    """Fetch a required env var or raise a clear error."""
+    value = os.getenv(name, "").strip()
     if not value:
         raise EnvironmentError(
-            f"❌  Missing environment variable: {name}\n"
-            f"    Add it to your .env file and restart."
+            f"❌  Missing required environment variable: {name}\n"
+            f"    Add it to signal_engine/.env and restart."
         )
     return value
 
-# Weather data — from openweathermap.org
-OPENWEATHERMAP_KEY = _require("OPENWEATHERMAP_KEY")
 
-# Ship tracking data — from marinetraffic.com
-MARINETRAFFIC_KEY  = os.getenv("MARINETRAFFIC_KEY", "")  # optional, fallback exists
+def _optional(name: str, default: str = "") -> str:
+    """Fetch an optional env var — returns default if absent."""
+    return os.getenv(name, default).strip()
 
-# News headlines — from gnews.io
-GNEWS_KEY          = _require("GNEWS_KEY")
 
-# OpenAI for reading/classifying news headlines
-OPENAI_KEY         = _require("OPENAI_KEY")
+# ── Required keys ─────────────────────────────────────────────
+SUPABASE_URL = _require("SUPABASE_URL")
+SUPABASE_KEY = _require("SUPABASE_KEY")
 
-# Supabase (our database in the cloud)
-SUPABASE_URL       = _require("SUPABASE_URL")
-SUPABASE_KEY       = _require("SUPABASE_KEY")
+# ── Optional API keys (Person A parsers) ──────────────────────
+# If any of these are missing, DEMO_MODE activates automatically.
+OPENWEATHERMAP_KEY = _optional("OPENWEATHERMAP_KEY")
+MARINETRAFFIC_KEY  = _optional("MARINETRAFFIC_KEY")
+GNEWS_KEY          = _optional("GNEWS_KEY")
+OPENAI_KEY         = _optional("OPENAI_KEY")
 
-# ── Demo Mode Flag ────────────────────────────────────────────
-# If DEMO_MODE=true is set in .env, we skip live API calls
-# and use pre-recorded data instead (WiFi backup for demo day).
-DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+# ── DEMO_MODE ─────────────────────────────────────────────────
+# Explicitly set in .env, OR auto-activated if any parser key is missing.
+_demo_env = os.getenv("DEMO_MODE", "false").lower() == "true"
+_keys_missing = not all([OPENWEATHERMAP_KEY, GNEWS_KEY, OPENAI_KEY])
 
-# ── Port Coordinates ─────────────────────────────────────────
-# lat = latitude  (how far north/south)
-# lng = longitude (how far east/west)
-# These are the real GPS coordinates of each port.
+DEMO_MODE: bool = _demo_env or _keys_missing
+
+if _keys_missing and not _demo_env:
+    logger.warning(
+        "⚠️  One or more parser API keys are missing. "
+        "DEMO_MODE automatically enabled — using pre-recorded signals."
+    )
+
+# ── Server config (Person B) ─────────────────────────────────
+API_HOST = _optional("API_HOST", "0.0.0.0")
+API_PORT = int(_optional("API_PORT", "8001"))
+POLL_INTERVAL_SECONDS = int(_optional("POLL_INTERVAL_SECONDS", "5"))
+COMPANY_ID = _optional("COMPANY_ID", "auroratea")
+
+# ── Port Coordinates (Person A weather parser) ───────────────
 PORTS = {
     "JNPT":    {"lat": 18.9489, "lng": 72.9518},
     "Chennai": {"lat": 13.0827, "lng": 80.2707},
     "Mundra":  {"lat": 22.7788, "lng": 69.7082},
 }
 
-# AIS baseline: how many ships are normally near JNPT.
-# If the real count drops below 70% of this → congestion alert.
+# AIS baseline: normal vessel count near JNPT.
+# If real count < 70% of this → congestion alert.
 AIS_BASELINE_VESSEL_COUNT = 45

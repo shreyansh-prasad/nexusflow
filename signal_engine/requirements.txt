@@ -1,8 +1,26 @@
-fastapi
-uvicorn[standard]
-httpx
-supabase
-openai
-apscheduler
-python-dotenv
-pydantic
+# NexusFlow — Merged requirements (Person A + Person B)
+# Run: pip install -r requirements.txt
+# from inside signal_engine/
+
+# ── Web Framework ──────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.7.1
+
+# ── Database ───────────────────────────────────────────────────
+supabase>=2.4.0
+
+# ── Graph Engine (Person B) ────────────────────────────────────
+networkx>=3.3
+
+# ── HTTP Client ────────────────────────────────────────────────
+httpx>=0.27.0
+
+# ── Environment / Config ───────────────────────────────────────
+python-dotenv>=1.0.1
+
+# ── AI / NLP (Person A — optional, used only when DEMO_MODE=false) ─
+openai>=1.0.0
+
+# ── Scheduler (Person A) ───────────────────────────────────────
+apscheduler>=3.10.0

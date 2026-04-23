@@ -1,288 +1,324 @@
-# ============================================================
-# main.py
-# ============================================================
-# What is this file?
-#   This is the BRAIN of the entire signal engine.
-#   It does four things:
-#
-#   1. Starts the FastAPI web server (so other people's code
-#      can talk to us via HTTP requests)
-#
-#   2. Starts the APScheduler (runs our parsers every 60 sec)
-#
-#   3. Runs the polling loop: calls all 3 parsers, deduplicates,
-#      saves real disruptions to the database
-#
-#   4. Defines all API endpoints so Person C's dashboard
-#      can trigger disruptions and fetch history
-#
-# What is FastAPI?
-#   FastAPI is a Python library that lets you create a web server.
-#   A web server is a program that LISTENS for incoming requests
-#   (like a receptionist) and responds with data.
-#   Person C's React dashboard will send requests to our server.
-#
-# What is an endpoint?
-#   An endpoint is a specific URL your server listens on.
-#   Like different departments in an office building:
-#   /api/trigger-disruption → the "fire alarm" department
-#   /api/disruptions/history → the "records" department
-#   /api/weather/mumbai → the "weather" department
-#   /health → the "is anyone home?" department
-# ============================================================
+"""
+main.py — NexusFlow™ Unified Server (Person A + Person B merged)
+
+Runs both engines in one FastAPI app on port 8001:
+  - Person A:  Signal Engine (weather / AIS / news parsers + APScheduler)
+  - Person B:  Graph & AI Engine (cascade, alerts, rerouting, dashboard)
+
+Start:
+    uvicorn main:app --reload --port 8001
+    (run from inside signal_engine/)
+
+Swagger UI:
+    http://localhost:8001/docs
+"""
 
 import asyncio
 import json
 import logging
 import os
-from contextlib import asynccontextmanager  # for startup/shutdown lifecycle
+import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware  # allows dashboard to call us
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from graph_router import router as graph_router
-app.include_router(graph_router)
-# Our own modules
-from config import DEMO_MODE
+
+# ── Person A modules ──────────────────────────────────────────────────────────
+from config import DEMO_MODE, API_HOST, API_PORT, POLL_INTERVAL_SECONDS
 from models.disruption_signal import DisruptionSignal
 import parsers.weather_parser as weather_parser
 import parsers.news_parser     as news_parser
 import parsers.ais_parser      as ais_parser
-import db.supabase_client      as db
+import db.supabase_client      as signal_db    # Person A's async DB helpers
 
-# ── Logging Setup ─────────────────────────────────────────────
-# This configures the logging system for the whole app.
-# All logger.info(), logger.error() calls go through this.
+# ── Person B modules ──────────────────────────────────────────────────────────
+from graph_router import router as graph_router          # Person B's 6 endpoints
+from db_client import get_new_disruption_events          # for cascade poller
+from graph_builder import build_graph
+from cascade_calculator import CascadeCalculator
+from rerouting import RerouteRecommender
+from decision_card import format_inr
+
+# ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
-    level=logging.INFO,                          # show INFO level and above
-    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
-    # Example output:
-    # 2026-04-01 09:23:11 [INFO] parsers.weather_parser — Alert: JNPT | severity=4
+    level=logging.INFO,
+    format="%(asctime)s  %(name)-30s  %(levelname)-8s  %(message)s",
+    datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
 
-# ── Demo Mode Loader ──────────────────────────────────────────
+# ── Shared state ──────────────────────────────────────────────────────────────
 DEMO_SIGNALS_PATH = os.path.join(os.path.dirname(__file__), "demo_data.json")
+_recommender      = RerouteRecommender()
+scheduler         = AsyncIOScheduler(timezone="UTC")
 
+
+# ── Demo signal loader ────────────────────────────────────────────────────────
 def load_demo_signals() -> list[DisruptionSignal]:
-    """
-    Reads pre-recorded signals from demo_data.json and returns
-    them as DisruptionSignal objects.
-
-    Called when DEMO_MODE=true (e.g., no WiFi on demo day).
-    """
     try:
         with open(DEMO_SIGNALS_PATH, "r") as f:
-            raw_list = json.load(f)   # json.load reads a file and parses it
-        # Convert each dict into a DisruptionSignal object
+            raw_list = json.load(f)
         return [DisruptionSignal(**item) for item in raw_list]
     except Exception as e:
         logger.error(f"❌  Failed to load demo signals: {e}")
         return []
 
 
-# ── Core Polling Function ─────────────────────────────────────
+# ── Person A: signal parser loop ─────────────────────────────────────────────
 async def run_all_parsers() -> None:
-    """
-    This function runs every 60 seconds automatically.
-    It's the heartbeat of the entire signal engine.
-
-    Flow:
-    1. Collect signals from all 3 parsers (or demo data)
-    2. For each signal: check if it's a duplicate
-    3. If new: save it to Supabase
-    """
+    """Runs every 60s via APScheduler: collect signals → deduplicate → save."""
     logger.info("🔄  Running parser cycle…")
 
-    # ── Collect signals ───────────────────────────────────────
     if DEMO_MODE:
-        # WiFi backup: use pre-recorded signals instead of live APIs
-        logger.info("📦  DEMO_MODE active — using pre-recorded signals")
+        logger.info("📦  DEMO_MODE — using pre-recorded signals")
         signals = load_demo_signals()
     else:
-        # Live mode: call all three real APIs in parallel
-        # asyncio.gather() runs multiple async functions AT THE SAME TIME
-        # (like asking 3 people to do 3 jobs simultaneously, not one by one)
         results = await asyncio.gather(
-            weather_parser.parse_all_ports(),   # returns list
-            ais_parser.parse_jnpt(),            # returns list
-            news_parser.parse_latest(),         # returns list
-            return_exceptions=True,  # if one fails, don't crash the others
+            weather_parser.parse_all_ports(),
+            ais_parser.parse_jnpt(),
+            news_parser.parse_latest(),
+            return_exceptions=True,
         )
-
-        # Flatten: results is [[sig1, sig2], [], [sig3]] → [sig1, sig2, sig3]
         signals = []
         for result in results:
             if isinstance(result, Exception):
-                # One parser threw an error — log it, keep going
-                logger.error(f"❌  Parser raised exception: {result}")
+                logger.error(f"❌  Parser exception: {result}")
             elif isinstance(result, list):
                 signals.extend(result)
 
-    logger.info(f"📊  Found {len(signals)} signal(s) this cycle")
+    logger.info(f"📊  {len(signals)} signal(s) this cycle")
 
-    # ── Save non-duplicate signals ────────────────────────────
-    saved_count = 0
+    saved = 0
     for signal in signals:
-        # Check if we already saved this recently
-        if await db.is_duplicate(signal):
-            continue   # skip — it's a duplicate
-
-        # Save to Supabase
-        new_id = await db.insert_disruption_event(signal)
+        if await signal_db.is_duplicate(signal):
+            continue
+        new_id = await signal_db.insert_disruption_event(signal)
         if new_id:
-            saved_count += 1
+            saved += 1
 
-    if saved_count > 0:
-        logger.info(f"💾  Saved {saved_count} new disruption event(s)")
+    if saved:
+        logger.info(f"💾  Saved {saved} new disruption event(s)")
     else:
-        logger.info("✅  No new disruptions to save this cycle")
+        logger.info("✅  No new disruptions this cycle")
 
 
-# ── Scheduler Setup ───────────────────────────────────────────
-# APScheduler runs background jobs at scheduled intervals.
-# Like setting an alarm that rings every 60 seconds.
-scheduler = AsyncIOScheduler(timezone="UTC")
+# ── Person B: cascade poller (runs every POLL_INTERVAL_SECONDS) ───────────────
+def _fmt_inr(amount: int) -> str:
+    try:
+        amount = int(amount)
+    except (TypeError, ValueError):
+        return "₹0"
+    if amount >= 10_000_000:
+        return f"₹{amount / 10_000_000:.2f}Cr"
+    elif amount >= 100_000:
+        return f"₹{amount / 100_000:.1f}L"
+    return f"₹{amount:,}"
 
 
-# ── App Lifecycle ─────────────────────────────────────────────
+def _process_event_sync(event: dict) -> bool:
+    """Synchronous cascade pipeline for one disruption event."""
+    from db_client import (
+        insert_alert, insert_rerouting_suggestions, update_node_risk_scores
+    )
+
+    event_id = event.get("id", "?")
+    location = event.get("affected_location", "")
+    severity = event.get("severity", 1)
+
+    logger.info(f"► Cascading {event_id[:8]}… loc={location} sev={severity}")
+    try:
+        G = build_graph()
+        if G.number_of_nodes() == 0:
+            logger.error("  ✗ Empty graph — run: python seed_data.py")
+            return False
+
+        calculator = CascadeCalculator(G)
+        results    = calculator.calculate(event)
+        if not results:
+            logger.warning(f"  ⚠ No cascade results for '{location}'")
+            return False
+
+        cascade_path   = calculator.get_cascade_path(event)
+        affected_ids   = [r["node_id"] for r in results if r["risk_score"] > 0.05]
+        total_exposure = sum(r["financial_exposure_inr"] for r in results)
+        max_risk       = max(r["risk_score"] for r in results)
+        nonzero_times  = [r["time_to_impact_hours"] for r in results if r["time_to_impact_hours"] > 0]
+        min_time       = min(nonzero_times) if nonzero_times else 0.0
+
+        alert_data = {
+            "disruption_event_id":          event_id,
+            "company_id":                   "auroratea",
+            "affected_node_ids":            affected_ids,
+            "cascade_path":                 cascade_path,
+            "total_financial_exposure_inr": total_exposure,
+            "max_risk_score":               round(max_risk, 3),
+            "time_to_impact_hours":         round(min_time, 1),
+            "status":                       "active",
+            "affected_location":            location,
+            "description":                  event.get("description", ""),
+            "signal_type":                  event.get("signal_type", ""),
+            "severity":                     severity,
+            "confidence_reason":            _recommender.get_confidence_reason(location),
+            "peer_intelligence":            _recommender.get_peer_intelligence(location),
+        }
+
+        saved_alert = insert_alert(alert_data)
+        if not saved_alert:
+            logger.error("  ✗ Failed to save alert")
+            return False
+
+        alert_id = saved_alert["id"]
+
+        suggestions = _recommender.get_suggestions({"affected_location": location})
+        if suggestions:
+            rows = [
+                {
+                    "alert_id":               alert_id,
+                    "original_route":         "Via JNPT Port → Rotterdam (Standard Route)",
+                    "alternative_route":      s["alternative_route"],
+                    "time_delta_hours":       s["time_delta_hours"],
+                    "cost_delta_inr":         s["cost_delta_inr"],
+                    "risk_reduction_percent": s["risk_reduction_percent"],
+                    "confidence_score":       s["confidence_score"],
+                    "recommendation_text":    s["recommendation_text"],
+                }
+                for s in suggestions
+            ]
+            insert_rerouting_suggestions(rows)
+
+        update_node_risk_scores(results)
+        logger.info(
+            f"  ✓ Alert {alert_id[:8]}  "
+            f"exposure={_fmt_inr(total_exposure)}  "
+            f"max_risk={max_risk:.3f}  nodes={len(affected_ids)}"
+        )
+        return True
+
+    except Exception as exc:
+        logger.exception(f"  ✗ Cascade failed for event {event_id}: {exc}")
+        return False
+
+
+def cascade_poll_job() -> None:
+    """Synchronous APScheduler job — polls for new events and runs cascade."""
+    new_events = get_new_disruption_events()
+    if not new_events:
+        return
+    logger.info(f"Found {len(new_events)} new disruption event(s)")
+    for event in new_events:
+        _process_event_sync(event)
+
+
+# ── App lifecycle ─────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Code before the 'yield' runs on startup.
-    Code after the 'yield' runs on shutdown.
-    This replaces the old @app.on_event("startup") pattern.
-    """
-    # ── STARTUP ──────────────────────────────────────────────
-    logger.info("🚀  NexusFlow Signal Engine starting…")
+    logger.info("🚀  NexusFlow Unified Server starting…")
     logger.info(f"    DEMO_MODE = {DEMO_MODE}")
+    logger.info(f"    Parser poll: 60s | Cascade poll: {POLL_INTERVAL_SECONDS}s")
 
-    # Add the polling job: run run_all_parsers every 60 seconds
-    # NOTE: News parser uses GNews which has 100 req/day limit.
-    # We run news every 5 minutes instead of every minute.
+    # Person A: signal parser every 60 seconds
     scheduler.add_job(
         run_all_parsers,
-        trigger="interval",    # run on a time interval
-        seconds=60,            # every 60 seconds
-        id="main_poll",
-        name="Main parser loop",
+        trigger="interval",
+        seconds=60,
+        id="signal_poll",
+        name="Signal parser loop",
         replace_existing=True,
     )
-    scheduler.start()
-    logger.info("⏰  Scheduler started — polling every 60 seconds")
 
-    # Run once immediately on startup (don't wait 60 seconds)
+    # Person B: cascade engine every POLL_INTERVAL_SECONDS
+    scheduler.add_job(
+        cascade_poll_job,
+        trigger="interval",
+        seconds=POLL_INTERVAL_SECONDS,
+        id="cascade_poll",
+        name="Cascade poller",
+        replace_existing=True,
+    )
+
+    scheduler.start()
+    logger.info("⏰  Scheduler started")
+
+    # Run once immediately on startup
     await run_all_parsers()
 
-    yield   # The app runs here (between startup and shutdown)
+    yield  # App runs here
 
-    # ── SHUTDOWN ──────────────────────────────────────────────
     scheduler.shutdown(wait=False)
     logger.info("🛑  Scheduler stopped. Goodbye!")
 
 
-# ── Create the FastAPI App ────────────────────────────────────
+# ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="NexusFlow Signal Engine",
-    description="Multi-Signal Fusion Engine (MSFE) for NexusFlow™",
-    version="1.0.0",
-    lifespan=lifespan,   # attach our startup/shutdown logic
+    title="NexusFlow™ — Unified API",
+    description=(
+        "Multi-Signal Fusion Engine (MSFE) + Cascade Disruption Graph Engine (CDGE).\n\n"
+        "**Person A endpoints** — signal ingestion + demo triggers\n"
+        "**Person B endpoints** — graph, cascade, alerts, dashboard, rerouting\n\n"
+        "Demo company: AuroraTex Industries (Surat textile exporter)"
+    ),
+    version="2.0.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
-# CORS Middleware — this allows Person C's React dashboard
-# (running on a different URL like localhost:3000) to call our API.
-# Without this, browsers BLOCK cross-origin requests for security.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],    # allow ALL origins (fine for hackathon)
-    allow_methods=["*"],    # allow GET, POST, etc.
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ── Routers ───────────────────────────────────────────────────────────────────
+app.include_router(graph_router)   # Person B: /api/graph, /api/cascade, /api/alerts, etc.
 
-# ════════════════════════════════════════════════════════════════
-#  API ENDPOINTS
-# ════════════════════════════════════════════════════════════════
 
-# ── Health Check ──────────────────────────────────────────────
-@app.get("/health")
-async def health_check():
-    """
-    The simplest endpoint. Just proves the server is running.
-    Vercel/Railway will ping this to check if we're alive.
+# ══════════════════════════════════════════════════════════════════════════════
+#  UTILITY ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
 
-    URL: GET /health
-    """
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/docs")
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
+
+@app.get("/health", tags=["Health"])
+def health():
+    """Quick ping — confirms both engines are alive."""
     return {
-        "status": "ok",
-        "demo_mode": DEMO_MODE,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "scheduler_running": scheduler.running,
+        "status":             "ok",
+        "service":            "NexusFlow Unified API v2.0",
+        "demo_mode":          DEMO_MODE,
+        "timestamp":          datetime.now(timezone.utc).isoformat(),
+        "scheduler_running":  scheduler.running,
+        "person_b_endpoints": [
+            "/api/graph/{company_id}",
+            "/api/cascade/{event_id}",
+            "/api/alerts/active",
+            "/api/dashboard/summary",
+            "/api/rerouting/{alert_id}",
+            "/api/internal/process/{event_id}",
+        ],
+        "person_a_endpoints": [
+            "/api/trigger-disruption",
+            "/api/trigger/{scenario}",
+            "/api/disruptions/history",
+            "/api/weather/mumbai",
+        ],
     }
 
 
-# ── Manual Disruption Trigger ─────────────────────────────────
-@app.post("/api/trigger-disruption")
-async def trigger_disruption(payload: dict):
-    """
-    THE MOST IMPORTANT ENDPOINT FOR THE DEMO.
-
-    Person C's dashboard calls this when the presenter clicks
-    the "Trigger Disruption" button. It fires a disruption
-    directly into the database, which the dashboard sees in ~1 second.
-
-    URL:    POST /api/trigger-disruption
-    Body:   JSON object with signal fields
-
-    Example body:
-    {
-      "signal_type": "weather",
-      "severity": 4,
-      "affected_location": "JNPT",
-      "affected_lat": 18.9489,
-      "affected_lng": 72.9518,
-      "estimated_duration_hours": 24,
-      "description": "Cyclone warning: Severe weather system approaching Mumbai coast."
-    }
-    """
-    try:
-        # Add confidence_score and raw_data if not provided in the payload
-        payload.setdefault("confidence_score", 0.95)
-        payload.setdefault("raw_data", {"source": "manual_trigger"})
-
-        # Convert the raw dict into a validated DisruptionSignal object
-        # If any field is missing or wrong type, Pydantic raises an error
-        signal = DisruptionSignal(**payload)
-
-    except Exception as e:
-        # 422 = Unprocessable Entity (the data format was wrong)
-        raise HTTPException(status_code=422, detail=f"Invalid payload: {e}")
-
-    # Save directly to database — bypass deduplication for manual triggers
-    # (The presenter might want to fire the same scenario twice for practice)
-    new_id = await db.insert_disruption_event(signal)
-
-    if new_id is None:
-        raise HTTPException(status_code=500, detail="Failed to save to database")
-
-    logger.info(f"🎯  Manual trigger: {signal.signal_type} @ {signal.affected_location} "
-                f"(severity={signal.severity}, id={new_id})")
-
-    return {
-        "status": "triggered",
-        "id": new_id,
-        "signal_type": signal.signal_type,
-        "affected_location": signal.affected_location,
-        "severity": signal.severity,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-# ── Pre-built Demo Scenarios ──────────────────────────────────
-# These are the exact 3 scenarios from the spec.
-# Person C can call /api/trigger/cyclone, /api/trigger/strike, etc.
-# instead of building the full JSON payload every time.
+# ══════════════════════════════════════════════════════════════════════════════
+#  PERSON A ENDPOINTS (signal engine)
+# ══════════════════════════════════════════════════════════════════════════════
 
 DEMO_SCENARIOS = {
     "cyclone": {
@@ -321,16 +357,42 @@ DEMO_SCENARIOS = {
 }
 
 
-@app.post("/api/trigger/{scenario_name}")
+@app.post("/api/trigger-disruption", tags=["Person A — Signal Engine"])
+async def trigger_disruption(payload: dict):
+    """
+    Fire a manual disruption directly into the database.
+    Person C's dashboard 'Trigger Disruption' button calls this.
+    Person B's cascade poller will pick it up within POLL_INTERVAL_SECONDS.
+    """
+    try:
+        payload.setdefault("confidence_score", 0.95)
+        payload.setdefault("raw_data", {"source": "manual_trigger"})
+        signal = DisruptionSignal(**payload)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid payload: {e}")
+
+    new_id = await signal_db.insert_disruption_event(signal)
+    if new_id is None:
+        raise HTTPException(status_code=500, detail="Failed to save to database")
+
+    logger.info(f"🎯  Manual trigger: {signal.signal_type} @ {signal.affected_location} "
+                f"(severity={signal.severity}, id={new_id})")
+    return {
+        "status":             "triggered",
+        "id":                 new_id,
+        "signal_type":        signal.signal_type,
+        "affected_location":  signal.affected_location,
+        "severity":           signal.severity,
+        "timestamp":          datetime.now(timezone.utc).isoformat(),
+        "note":               f"Cascade will run automatically in ~{POLL_INTERVAL_SECONDS}s",
+    }
+
+
+@app.post("/api/trigger/{scenario_name}", tags=["Person A — Signal Engine"])
 async def trigger_scenario(scenario_name: str):
     """
-    Shortcut to fire a pre-built demo scenario.
-
-    URL: POST /api/trigger/cyclone
-         POST /api/trigger/strike
-         POST /api/trigger/redsea
-
-    Person C just calls one of these — no need to build the payload.
+    Shortcut for pre-built demo scenarios.
+    POST /api/trigger/cyclone | /api/trigger/strike | /api/trigger/redsea
     """
     scenario = DEMO_SCENARIOS.get(scenario_name)
     if not scenario:
@@ -341,72 +403,64 @@ async def trigger_scenario(scenario_name: str):
         )
 
     signal = DisruptionSignal(**scenario)
-    new_id = await db.insert_disruption_event(signal)
+    new_id = await signal_db.insert_disruption_event(signal)
 
     logger.info(f"🎬  Demo scenario '{scenario_name}' fired (id={new_id})")
-
     return {
-        "status": "triggered",
-        "scenario": scenario_name,
-        "id": new_id,
+        "status":      "triggered",
+        "scenario":    scenario_name,
+        "id":          new_id,
         "description": signal.description,
+        "note":        f"Cascade will run automatically in ~{POLL_INTERVAL_SECONDS}s",
     }
 
 
-# ── Disruption History ────────────────────────────────────────
-@app.get("/api/disruptions/history")
+@app.get("/api/disruptions/history", tags=["Person A — Signal Engine"])
 async def disruption_history(limit: int = 10):
-    """
-    Returns the last N disruption events from the database.
-    The dashboard uses this to show the "Recent Events" timeline.
-
-    URL: GET /api/disruptions/history
-         GET /api/disruptions/history?limit=20
-    """
-    events = await db.get_disruption_history(limit=limit)
-    return {
-        "count": len(events),
-        "events": events,
-    }
+    """Returns the last N disruption events from the database."""
+    events = await signal_db.get_disruption_history(limit=limit)
+    return {"count": len(events), "events": events}
 
 
-# ── Mumbai Weather Widget ─────────────────────────────────────
-@app.get("/api/weather/mumbai")
+@app.get("/api/weather/mumbai", tags=["Person A — Signal Engine"])
 async def mumbai_weather():
-    """
-    Returns current weather for Mumbai (JNPT area).
-    The dashboard shows this in a live weather widget
-    to prove we're pulling real data.
-
-    URL: GET /api/weather/mumbai
-    """
+    """Current weather for Mumbai (JNPT area) — for the live dashboard widget."""
     if DEMO_MODE:
-        # In demo mode return a fixed snapshot so it always looks good
         return {
-            "location": "Mumbai (JNPT)",
-            "temperature_c": 31.4,
-            "feels_like_c": 36.2,
-            "wind_kmh": 28.5,
-            "rain_3h_mm": 0,
-            "description": "scattered clouds",
-            "humidity_pct": 74,
-            "source": "demo_mode",
+            "location":       "Mumbai (JNPT)",
+            "temperature_c":  31.4,
+            "feels_like_c":   36.2,
+            "wind_kmh":       28.5,
+            "rain_3h_mm":     0,
+            "description":    "scattered clouds",
+            "humidity_pct":   74,
+            "source":         "demo_mode",
         }
-
     summary = await weather_parser.get_mumbai_weather_summary()
     return summary
 
 
-# ── List All Endpoints (useful for debugging) ─────────────────
-@app.get("/api/endpoints")
+@app.get("/api/endpoints", tags=["Debug"])
 async def list_endpoints():
-    """Returns all available API routes — useful during development."""
+    """Lists all registered API routes — useful for debugging."""
     routes = []
     for route in app.routes:
         if hasattr(route, "methods"):
             routes.append({
-                "path": route.path,
+                "path":    route.path,
                 "methods": list(route.methods),
-                "name": route.name,
+                "name":    route.name,
             })
-    return {"endpoints": routes}
+    return {"count": len(routes), "endpoints": routes}
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host=API_HOST,
+        port=API_PORT,
+        reload=True,
+        reload_excludes=["*.sql", "*.md", "*.txt", "*.json", ".env", "__pycache__"],
+    )

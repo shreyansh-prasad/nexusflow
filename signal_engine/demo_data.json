@@ -1,0 +1,75 @@
+[
+  {
+    "signal_type": "weather",
+    "severity": 4,
+    "affected_location": "JNPT",
+    "affected_lat": 18.9489,
+    "affected_lng": 72.9518,
+    "estimated_duration_hours": 24,
+    "confidence_score": 0.95,
+    "description": "Cyclone warning: Severe weather system approaching Mumbai coast. JNPT operations at risk.",
+    "raw_data": {
+      "source": "demo_mode",
+      "wind_kmh": 68,
+      "rain_3h_mm": 42
+    }
+  },
+  {
+    "signal_type": "port_congestion",
+    "severity": 3,
+    "affected_location": "JNPT",
+    "affected_lat": 18.9489,
+    "affected_lng": 72.9518,
+    "estimated_duration_hours": 8,
+    "confidence_score": 0.85,
+    "description": "Port congestion detected at JNPT. Current vessel count: 28 (62% of baseline 45). Cargo handling delays expected.",
+    "raw_data": {
+      "source": "demo_mode",
+      "vessel_count": 28,
+      "baseline": 45
+    }
+  },
+  {
+    "signal_type": "news",
+    "severity": 3,
+    "affected_location": "JNPT",
+    "affected_lat": 18.9489,
+    "affected_lng": 72.9518,
+    "estimated_duration_hours": 48,
+    "confidence_score": 0.70,
+    "description": "News signal: Port workers strike action announced at JNPT. Cargo handling suspended indefinitely.",
+    "raw_data": {
+      "source": "demo_mode",
+      "headline": "Port workers strike action announced at JNPT. Cargo handling suspended indefinitely."
+    }
+  },
+  {
+    "signal_type": "geopolitical",
+    "severity": 5,
+    "affected_location": "Rotterdam",
+    "affected_lat": 51.9225,
+    "affected_lng": 4.4792,
+    "estimated_duration_hours": 336,
+    "confidence_score": 0.70,
+    "description": "Red Sea crisis escalation. All vessels rerouting via Cape of Good Hope. +14 days transit time.",
+    "raw_data": {
+      "source": "demo_mode",
+      "headline": "Red Sea crisis forces global shipping reroute via Cape of Good Hope"
+    }
+  },
+  {
+    "signal_type": "weather",
+    "severity": 3,
+    "affected_location": "Chennai",
+    "affected_lat": 13.0827,
+    "affected_lng": 80.2707,
+    "estimated_duration_hours": 12,
+    "confidence_score": 0.95,
+    "description": "Heavy rainfall alert at Chennai Port. Wind 45 km/h, Rain 28mm in 3h. Severity 3/5.",
+    "raw_data": {
+      "source": "demo_mode",
+      "wind_kmh": 45,
+      "rain_3h_mm": 28
+    }
+  }
+]

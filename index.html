@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NexusFlow™ — 3D Blueprint Landing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@300;400;600;700&family=Barlow:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#060a11;--panel:rgba(13,20,32,.85);--line:#21334d;--text:#eaf0f7;--muted:#6480a1;--muted2:#7f95b0;--orange:#f97316;--blue:#3b82f6;--green:#16a34a;--shadow:0 30px 90px rgba(0,0,0,.45)}
+    *{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{background:radial-gradient(circle at 50% 20%, rgba(59,130,246,.1), transparent 28%), var(--bg);color:var(--text);font-family:'Barlow',sans-serif;overflow-x:hidden}
+    body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.65;background:linear-gradient(rgba(59,130,246,.04) 1px, transparent 1px),linear-gradient(90deg, rgba(59,130,246,.04) 1px, transparent 1px),url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg fill='none' stroke='white' stroke-opacity='.03'%3E%3Cpath d='M0 44H220M0 88H220M0 132H220M0 176H220'/%3E%3Cpath d='M44 0V220M88 0V220M132 0V220M176 0V220'/%3E%3C/g%3E%3C/svg%3E");background-size:72px 72px,72px 72px,220px 220px;z-index:0}
+    .frame{position:fixed;inset:14px;border:1px solid rgba(255,255,255,.09);pointer-events:none;z-index:20}
+    .frame::before,.frame::after{content:"";position:absolute;width:22px;height:22px;border-style:solid;border-color:rgba(255,255,255,.28)}
+    .frame::before{top:-1px;left:-1px;border-width:1px 0 0 1px}
+    .frame::after{right:-1px;bottom:-1px;border-width:0 1px 1px 0}
+    nav{position:fixed;top:0;left:0;right:0;z-index:30;display:flex;align-items:center;justify-content:space-between;padding:18px 26px;background:linear-gradient(to bottom, rgba(6,10,17,.92), rgba(6,10,17,.3), transparent);backdrop-filter:blur(10px)}
+    .brand{font-family:'Bebas Neue',sans-serif;font-size:25px;letter-spacing:3px}.brand span{color:var(--orange)}
+    .nav-note{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:2.4px;text-transform:uppercase;color:var(--muted)}
+    .nav-cta{padding:11px 16px;border:1px solid rgba(249,115,22,.7);background:rgba(249,115,22,.06);color:var(--orange);text-decoration:none;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:2.4px;text-transform:uppercase;transition:.2s}
+    .nav-cta:hover{background:rgba(249,115,22,.15)}
+    
+    /* 3D Scene Fade Logic */
+    #scene{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:0;transition:opacity 0.8s ease-in-out;}
+    #scene.visible{opacity:1;}
+    #scene canvas{display:block;width:100%;height:100%}
+    
+    .overlay{position:relative;z-index:2}
+    section{min-height:100vh;display:flex;align-items:center;padding:110px 24px 72px}
+    .container{width:min(1400px,100%);margin:0 auto}
+    
+    /* Intro / CTA Section */
+    .intro-section{display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;min-height:100vh}
+    .intro-section .headline{font-size:clamp(64px, 8vw, 120px)}
+    
+    .hero{display:grid;grid-template-columns:1.02fr .98fr;gap:34px;align-items:center;min-height:100vh}
+    .text-block{background:rgba(6,10,17,.6);backdrop-filter:blur(12px);padding:24px;border-radius:8px;border:1px solid rgba(255,255,255,.02)}
+    .eyebrow{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--muted);margin-bottom:16px}
+    .headline{font-family:'Bebas Neue',sans-serif;font-size:clamp(72px, 10vw, 156px);line-height:.9;letter-spacing:5px;text-transform:uppercase;color:var(--text)}
+    .headline .accent{color:var(--orange)}
+    .copy{margin-top:18px;max-width:560px;color:var(--muted2);font-size:16px;line-height:1.85}
+    .meta{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
+    .pill{border:1px solid rgba(46,73,110,.9);background:rgba(13,20,32,.72);padding:12px 14px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:1.7px;text-transform:uppercase;color:var(--muted2)}
+    .pill strong{color:var(--text)}
+    
+    .panel{background:var(--panel);backdrop-filter:blur(12px);border:1px solid rgba(46,73,110,.82);box-shadow:var(--shadow);position:relative;overflow:hidden}
+    .panel::after{content:"";position:absolute;inset:12px;border:1px solid rgba(255,255,255,.03);pointer-events:none}
+    .panel-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:24px 24px 0}
+    .panel-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(40px, 4vw, 72px);line-height:1;letter-spacing:4px;text-transform:uppercase}
+    .panel-text{max-width:360px;color:var(--muted2);font-size:15px;line-height:1.8}
+    .grid-card{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:28px;background:rgba(46,73,110,.75)}
+    .metric{background:rgba(11,17,28,.95);padding:20px;min-height:108px}
+    .metric .k{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+    .metric .v{font-family:'Bebas Neue',sans-serif;font-size:42px;line-height:1;letter-spacing:2px}
+    .metric .v.orange{color:var(--orange)} .metric .v.green{color:var(--green)} .metric .v.blue{color:var(--blue)}
+    .section-grid{display:grid;grid-template-columns:1fr 1fr;gap:34px;align-items:center}
+    .story{min-height:100vh}
+    .parts{display:grid;gap:14px;margin-top:26px}
+    .part{display:flex;justify-content:space-between;gap:18px;align-items:center;padding:14px 16px;border:1px solid rgba(46,73,110,.75);background:rgba(13,20,32,.7);transition:.2s ease}
+    .part:hover{transform:translateX(4px);border-color:rgba(249,115,22,.6)}
+    .part .name{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text)}
+    .part .desc{color:var(--muted2);font-size:14px}
+    .tag{color:var(--orange);font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;white-space:nowrap}
+    .route-box{height:560px;position:relative}
+    .route-box .label{position:absolute;font-family:'Bebas Neue',sans-serif;font-size:56px;letter-spacing:4px;line-height:1;top:24px;left:24px;z-index:2;text-transform:uppercase}
+    .route-box .label span{color:var(--orange)}
+    .route-box .small{position:absolute;bottom:24px;left:24px;z-index:2;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted2)}
+    
+    .btn{display:inline-flex;margin-top:34px;padding:16px 24px;border:1px solid rgba(249,115,22,.75);background:rgba(249,115,22,.07);color:var(--orange);text-decoration:none;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:2.5px;text-transform:uppercase;transition:.2s}
+    .btn:hover{background:rgba(249,115,22,.15)}
+    .reveal{opacity:0;transform:translateY(28px);transition:opacity .85s ease, transform .85s ease}
+    .reveal.in{opacity:1;transform:translateY(0)}
+    @media (max-width: 1100px){.hero,.section-grid{grid-template-columns:1fr}.route-box,.hero-right{min-height:420px}section{padding-top:96px}.nav-note{display:none}}
+    @media (max-width: 720px){nav{padding:14px 16px}.brand{font-size:20px}.nav-cta{padding:10px 12px;font-size:10px}.headline{letter-spacing:3px}.grid-card{grid-template-columns:1fr}.metric .v{font-size:34px}.panel-head{flex-direction:column}}
+  </style>
+</head>
+<body>
+  <div class="frame"></div>
+  <nav>
+    <div class="brand">Nexus<span>Flow</span>™</div>
+    <div class="nav-note">Logistics-first blueprint / vertical scrollytelling</div>
+    <a href="dashboard.html" class="nav-cta">Enter Dashboard →</a>
+  </nav>
+  <div id="scene"></div>
+  <div class="overlay">
+
+    <section class="story" id="intro">
+      <div class="container intro-section reveal">
+        <div class="eyebrow">00 · OVERVIEW</div>
+        <h2 class="headline">Nexus<span class="accent">Flow</span></h2>
+        <p class="copy" style="margin:18px auto 0;text-align:center;max-width:680px">A premium truck-first landing page that feels engineered instead of templated: 3D wireframe, vertical narrative, orange highlights, and technical framing.</p>
+        <a class="btn" href="#hero">Explore Architecture ↓</a>
+      </div>
+    </section>
+
+    <section id="hero">
+      <div class="container hero">
+        <div class="text-block">
+          <div class="eyebrow reveal">01 · HERO STATE</div>
+          <h1 class="headline reveal" style="transition-delay:.08s">Precision<br><span class="accent">in motion</span></h1>
+          <p class="copy reveal" style="transition-delay:.16s">A cinematic logistics interface built around a smart cargo crate in true 3D. Scroll downward and the parcel rotates, separates, and reveals its data core while the supply-chain story unfolds in technical panels.</p>
+          <div class="meta reveal" style="transition-delay:.24s">
+            <div class="pill"><strong>3D</strong> wireframe cargo</div>
+            <div class="pill"><strong>Vertical</strong> scroll narrative</div>
+            <div class="pill"><strong>Orange</strong> active accent</div>
+          </div>
+        </div>
+        <div class="panel hero-right reveal" style="transition-delay:.12s">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">Smart Parcel · 28T</div>
+              <div class="panel-title">NexusFlow™</div>
+            </div>
+            <div class="panel-text">Premium blueprint styling with layered grid frames, technical annotations, and a 3D wireframe shipment that behaves like an engineered exhibit.</div>
+          </div>
+          <div class="grid-card">
+            <div class="metric"><div class="k">Capacity</div><div class="v orange">28T</div></div>
+            <div class="metric"><div class="k">Nodes</div><div class="v blue">24</div></div>
+            <div class="metric"><div class="k">Health</div><div class="v green">99.6%</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="story">
+      <div class="container section-grid">
+        <div class="panel reveal">
+          <div class="panel-head">
+            <div><div class="eyebrow">02 · PARCEL ANATOMY</div><div class="panel-title">Built for transit</div></div>
+            <div class="panel-text">The parcel should feel like a premium technical object, not a flat icon. Every part needs depth, wireframe edges, and a blueprint-grade composition.</div>
+          </div>
+          <div class="parts">
+            <div class="part"><div><div class="name">Outer Shell</div><div class="desc">Reinforced cargo protection</div></div><div class="tag">Shield</div></div>
+            <div class="part"><div><div class="name">Data Core</div><div class="desc">Active internal tracking payload</div></div><div class="tag">Telemetry</div></div>
+            <div class="part"><div><div class="name">Scanner Ring</div><div class="desc">Real-time status validation</div></div><div class="tag">Sensor</div></div>
+          </div>
+          <div class="grid-card">
+            <div class="metric"><div class="k">Transit</div><div class="v">80</div></div>
+            <div class="metric"><div class="k">Coverage</div><div class="v orange">120+</div></div>
+            <div class="metric"><div class="k">On Time</div><div class="v green">99.6%</div></div>
+          </div>
+        </div>
+        <div class="panel reveal">
+          <div class="panel-head">
+            <div><div class="eyebrow">03 · EXPLODED VIEW</div><div class="panel-title">Anatomy of a crate</div></div>
+            <div class="panel-text">Use the scroll to split the structure into layers: shell, data core, and security overlays. The motion should be vertical, deliberate, and editorial.</div>
+          </div>
+          <div class="parts" style="margin-top:22px">
+            <div class="part"><div><div class="name">Origin → Transit</div><div class="desc">Loading and departure</div></div><div class="tag">Stage 01</div></div>
+            <div class="part"><div><div class="name">Transit → Hub</div><div class="desc">Route optimization and tracking</div></div><div class="tag">Stage 02</div></div>
+            <div class="part"><div><div class="name">Hub → Destination</div><div class="desc">Final delivery and confirmation</div></div><div class="tag">Stage 03</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="story">
+      <div class="container section-grid">
+        <div class="panel reveal route-box">
+          <div class="label">ROUTE <span>FLOW</span></div>
+          <div class="small">Origin · Hub · Destination · ETA</div>
+          <svg viewBox="0 0 900 560" width="100%" height="100%" style="position:absolute;inset:0">
+            <path d="M120 390 C 220 310, 300 320, 390 350 S 560 440, 650 360 S 760 240, 820 180" fill="none" stroke="#f97316" stroke-width="4" stroke-dasharray="10 10" opacity=".96"/>
+            <circle cx="120" cy="390" r="8" fill="#f97316"/>
+            <circle cx="390" cy="350" r="8" fill="#f97316"/>
+            <circle cx="650" cy="360" r="8" fill="#f97316"/>
+            <circle cx="820" cy="180" r="8" fill="#f97316"/>
+            <circle cx="520" cy="250" r="115" fill="none" stroke="#2a4262" stroke-width="2" opacity=".65"/>
+            <circle cx="520" cy="250" r="6" fill="#3b82f6"/>
+          </svg>
+        </div>
+        <div class="panel reveal">
+          <div class="panel-head">
+            <div><div class="eyebrow">04 · SUPPLY CHAIN</div><div class="panel-title">Tracked in real time</div></div>
+            <div class="panel-text">The same blueprint language extends into supply chain intelligence with nodes, routes, packages, and delivery layers — still dark, still technical, still premium.</div>
+          </div>
+          <div class="parts">
+            <div class="part"><div><div class="name">Warehouse → Transit</div><div class="desc">Load handoff</div></div><div class="tag">Live</div></div>
+            <div class="part"><div><div class="name">Reroute Node</div><div class="desc">Alternative route calculation</div></div><div class="tag">AI</div></div>
+            <div class="part"><div><div class="name">Destination Pin</div><div class="desc">Arrival confirmation</div></div><div class="tag">Done</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
+  <script>
+    const revealObserver = new IntersectionObserver(entries => {
+      entries.forEach(entry => { if (entry.isIntersecting) entry.target.classList.add('in'); });
+    }, { threshold: 0.18 });
+    document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+
+    let scene, camera, renderer, parcel, parts = {};
+    const target = { ry:0, rx:0, y:0, explode:0, z:18 };
+
+    function wireMat(color){
+      return new THREE.MeshBasicMaterial({ color, wireframe:true, transparent:true, opacity:0.96 });
+    }
+    function box(w,h,d,color,x=0,y=0,z=0){
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), wireMat(color));
+      m.position.set(x,y,z);
+      return m;
+    }
+
+    function buildParcel(){
+      parcel = new THREE.Group();
+      const blue = 0x86a3c6, orange = 0xf97316;
+
+      // Outer Wireframe Crate
+      const crateGroup = new THREE.Group();
+      crateGroup.add(box(5, 5, 5, blue)); // Main shell
+      
+      // Corner reinforcements
+      const edge = 2.5;
+      crateGroup.add(box(0.4, 5.1, 0.4, blue, edge, 0, edge));
+      crateGroup.add(box(0.4, 5.1, 0.4, blue, -edge, 0, edge));
+      crateGroup.add(box(0.4, 5.1, 0.4, blue, edge, 0, -edge));
+      crateGroup.add(box(0.4, 5.1, 0.4, blue, -edge, 0, -edge));
+      parcel.add(crateGroup);
+      parts.crate = crateGroup;
+
+      // Inner Data Core (Solid but slightly transparent)
+      const core = new THREE.Mesh(
+        new THREE.BoxGeometry(3.2, 3.2, 3.2),
+        new THREE.MeshBasicMaterial({ color: orange, wireframe: true, transparent: true, opacity: 0.85 })
+      );
+      parcel.add(core);
+      parts.core = core;
+
+      // High-Tech Scanner Ring
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(3.8, 0.04, 16, 100),
+        new THREE.MeshBasicMaterial({ color: blue })
+      );
+      ring.rotation.x = Math.PI / 2;
+      parcel.add(ring);
+      parts.ring = ring;
+
+      // Base Grid
+      const grid = new THREE.GridHelper(40,40,0x2a4262,0x1a2940);
+      grid.position.y = -3.5; grid.material.transparent = true; grid.material.opacity = 0.35;
+      scene.add(grid);
+
+      parcel.position.set(0, -0.5, 0);
+      scene.add(parcel);
+    }
+
+    function init(){
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(35, innerWidth/innerHeight, 0.1, 100);
+      camera.position.set(0, 1.2, 18);
+      renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+      renderer.setSize(innerWidth, innerHeight);
+      document.getElementById('scene').appendChild(renderer.domElement);
+      buildParcel();
+      animate();
+      syncFromScroll(); // Initial check
+    }
+
+    function syncFromScroll(){
+      const total = Math.max(document.body.scrollHeight - innerHeight, 1);
+      const p = Math.max(0, Math.min(1, scrollY / total));
+
+      // Fade Logic: Keeps the 3D model hidden when behind the top centered text
+      const sceneEl = document.getElementById('scene');
+      if (scrollY < window.innerHeight * 0.4) {
+         sceneEl.classList.remove('visible');
+      } else {
+         sceneEl.classList.add('visible');
+      }
+
+      // Base rotation and movement logic based on scroll percentage
+      target.ry = p * Math.PI * 2.5; // Rotates multiple times as you scroll
+      target.rx = -0.1 + p * 0.3;
+      target.y = Math.sin(p * Math.PI) * 1.5 - 0.5; // Slight hover arc
+      target.explode = Math.max(0, Math.min(1, (p - 0.15) / 0.6));
+      target.z = 18 - p * 4;
+
+      const e = target.explode;
+      if (parts.crate) {
+        parts.crate.scale.set(1 + e * 0.3, 1 + e * 0.3, 1 + e * 0.3); // Outer shell expands
+      }
+      if (parts.core) {
+        parts.core.rotation.y = -target.ry * 0.5; // Core spins opposite direction
+        parts.core.rotation.x = e * 0.5;
+      }
+    }
+
+    function animate(){
+      requestAnimationFrame(animate);
+      syncFromScroll();
+
+      // Continuous scanner ring animation independent of scroll
+      if (parts.ring) {
+        parts.ring.position.y = Math.sin(Date.now() * 0.002) * 2.2 - 0.5; 
+      }
+
+      if (parcel) {
+        parcel.rotation.y += (target.ry - parcel.rotation.y) * 0.06;
+        parcel.rotation.x += (target.rx - parcel.rotation.x) * 0.06;
+        parcel.position.y += (target.y - parcel.position.y) * 0.06;
+      }
+      
+      camera.position.z += (target.z - camera.position.z) * 0.05;
+      renderer.render(scene, camera);
+    }
+
+    addEventListener('resize', ()=>{
+      if(!renderer || !camera) return;
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+    addEventListener('scroll', syncFromScroll, { passive:true });
+    init();
+  </script>
+</body>
+</html>

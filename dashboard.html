@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NexusFlow™ — Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@300;400;600;700&family=Barlow:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    :root{
+      --bg:#070b12; --panel:#0d1420; --panel2:#101a29; --line:#1f314a; --line2:#2a4262;
+      --text:#eaf0f7; --muted:#5f7695; --muted2:#7e93ad; --orange:#f97316; --blue:#3b82f6;
+      --green:#16a34a; --red:#dc2626; --amber:#d97706; --shadow:0 24px 80px rgba(0,0,0,.38);
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif}
+    body::before{
+      content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.7;
+      background:
+        radial-gradient(circle at 50% 20%, rgba(59,130,246,.08), transparent 30%),
+        linear-gradient(rgba(59,130,246,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59,130,246,.04) 1px, transparent 1px);
+      background-size:auto, 64px 64px, 64px 64px;
+    }
+    .frame{position:fixed;inset:14px;border:1px solid rgba(255,255,255,.08);pointer-events:none;z-index:10}
+    .frame::before,.frame::after{content:"";position:absolute;width:22px;height:22px;border-color:rgba(255,255,255,.24);border-style:solid}
+    .frame::before{top:-1px;left:-1px;border-width:1px 0 0 1px}
+    .frame::after{right:-1px;bottom:-1px;border-width:0 1px 1px 0}
+    .topbar{
+      position:relative;z-index:2;
+      height:68px;display:flex;align-items:center;gap:18px;
+      padding:0 22px;border-bottom:1px solid var(--line);background:rgba(7,11,18,.9);backdrop-filter:blur(10px)
+    }
+    .brand{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:3px}
+    .brand span{color:var(--orange)}
+    .company{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
+    .spacer{flex:1}
+    .toggle,.cta{
+      border:1px solid var(--line2);background:rgba(16,26,41,.72);color:var(--text);
+      padding:11px 14px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;cursor:pointer
+    }
+    .toggle{display:inline-flex;align-items:center;gap:10px}
+    .toggle.active{border-color:rgba(249,115,22,.7);color:var(--orange);background:rgba(249,115,22,.08)}
+    .cta{color:var(--orange);border-color:rgba(249,115,22,.7);text-decoration:none}
+    .banner{
+      position:relative;z-index:2;height:72px;display:grid;grid-template-columns:repeat(4,1fr);
+      border-bottom:1px solid var(--line)
+    }
+    .stat{display:flex;align-items:center;gap:12px;padding:0 18px;border-right:1px solid var(--line);background:rgba(13,20,32,.88)}
+    .stat:last-child{border-right:none}
+    .ico{font-size:18px}
+    .meta{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted)}
+    .value{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;line-height:1}
+    .value.green{color:var(--green)} .value.red{color:var(--red)} .value.amber{color:var(--amber)}
+    .layout{position:relative;z-index:1;height:calc(100vh - 140px);display:grid;grid-template-columns:340px 1fr 280px;overflow:hidden}
+    .left,.center,.right{min-height:0}
+    .left{
+      background:rgba(13,20,32,.95);border-right:1px solid var(--line);display:flex;flex-direction:column
+    }
+    .ticker{display:none;gap:10px;padding:10px 14px;border-bottom:1px solid rgba(249,115,22,.18);background:rgba(249,115,22,.06)}
+    .ticker.show{display:flex}
+    .ticker .label{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--orange)}
+    .ticker .text{white-space:nowrap;overflow:hidden;animation:marquee 20s linear infinite;color:var(--muted2);font-size:11px}
+    @keyframes marquee{0%{transform:translateX(100%)}100%{transform:translateX(-100%)}}
+    .feed{padding:12px;overflow:auto;display:flex;flex-direction:column;gap:10px}
+    .empty{min-height:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--muted);gap:10px}
+    .empty .title{font-size:15px;color:var(--muted2);font-weight:700}
+    .card{
+      border:1px solid var(--line);background:rgba(16,26,41,.85);overflow:hidden;
+      border-left:3px solid transparent
+    }
+    .card.weather{border-left-color:#0ea5e9}.card.port_congestion{border-left-color:var(--amber)}
+    .card.news{border-left-color:#a855f7}.card.geopolitical{border-left-color:var(--red)}
+    .card.accepted{border-color:var(--green);border-left-color:var(--green);background:rgba(22,163,74,.05)}
+    .card .head{display:flex;gap:10px;padding:12px 12px 0}
+    .sig{
+      width:34px;height:34px;border-radius:2px;display:grid;place-items:center;flex:none;
+      background:rgba(255,255,255,.04);border:1px solid var(--line)
+    }
+    .type{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:3px}
+    .type.weather{color:#0ea5e9}.type.port_congestion{color:var(--amber)}.type.news{color:#a855f7}.type.geopolitical{color:var(--red)}
+    .place{font-weight:700;font-size:15px}
+    .time{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted)}
+    .severity{padding:10px 12px;display:flex;align-items:center;gap:8px}
+    .sev-bits{flex:1;display:flex;gap:2px}
+    .sev-bits span{height:4px;flex:1;background:var(--line);border-radius:2px}
+    .sev-1 .sev-bits span:nth-child(-n+1),.sev-2 .sev-bits span:nth-child(-n+2),.sev-3 .sev-bits span:nth-child(-n+3){background:var(--amber)}
+    .sev-4 .sev-bits span:nth-child(-n+4),.sev-5 .sev-bits span:nth-child(-n+5){background:var(--red)}
+    .body{padding:0 12px 12px;color:var(--muted2);line-height:1.55;font-size:12px}
+    .money{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+    .money .k,.smallk{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
+    .money .v{font-family:'Bebas Neue',sans-serif;font-size:24px;line-height:1}
+    .money .v.red{color:var(--red)} .money .v.amber{color:var(--amber)}
+    .confidence,.peer{display:none;padding:8px 12px;border-top:1px solid var(--line);font-size:12px;line-height:1.55;color:var(--muted2)}
+    .confidence.show,.peer.show{display:block}
+    .confidence .smallk{margin-bottom:5px;color:var(--muted2)}
+    .option-box{border:1px solid var(--line);padding:10px;margin-bottom:6px;cursor:pointer;background:transparent}
+    .option-box:hover{border-color:var(--green);background:rgba(22,163,74,.08)}
+    .option-box.accepted-route{border-color:var(--green);background:rgba(22,163,74,.12)}
+    .option-name{font-weight:700;font-size:13px;margin-bottom:3px}
+    .option-stats{display:flex;gap:10px;flex-wrap:wrap;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted)}
+    .option-stats span{color:var(--text)}
+    .option-stats .save span{color:var(--green);font-weight:700}
+    .accept{
+      display:block;width:100%;margin-top:8px;padding:9px 10px;border:none;background:var(--green);color:#fff;
+      font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;cursor:pointer
+    }
+
+    .center{display:grid;grid-template-rows:1fr auto}
+    .map-wrap{position:relative;min-height:0}
+    #map{position:absolute;inset:0}
+    .processing{
+      position:absolute;top:14px;left:50%;transform:translateX(-50%);
+      padding:8px 14px;background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.24);
+      font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:1px;color:var(--orange);
+      display:none;align-items:center;gap:10px;z-index:5
+    }
+    .processing.show{display:flex}
+    .spinner{width:12px;height:12px;border:1.5px solid var(--orange);border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .graph{
+      display:none;border-top:1px solid var(--line);height:240px;position:relative;background:rgba(7,11,18,.92)
+    }
+    .graph.show{display:block}
+    .graph .label{
+      position:absolute;top:10px;left:12px;z-index:2;
+      font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted)
+    }
+    #graphCanvas{position:absolute;inset:0;width:100%;height:100%}
+
+    .right{
+      display:none;background:rgba(13,20,32,.95);border-left:1px solid var(--line);flex-direction:column;overflow:hidden
+    }
+    .right.show{display:flex}
+    .section{border-bottom:1px solid var(--line);overflow:hidden}
+    .section .head{
+      padding:10px 14px;border-bottom:1px solid var(--line);
+      font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted)
+    }
+    #timeline{padding:8px;display:flex;flex-direction:column;gap:6px;overflow:auto;max-height:250px}
+    .tl{padding:8px;border:1px solid var(--line);background:rgba(16,26,41,.85)}
+    .tl-top{display:flex;justify-content:space-between;gap:10px;margin-bottom:3px}
+    .tl-type{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase}
+    .tl-time{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted)}
+    .tl-desc{font-size:11px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .weather{padding:14px}
+    .weather-main{display:flex;align-items:center;gap:12px}
+    .weather-temp{font-family:'Bebas Neue',sans-serif;font-size:38px;line-height:1;letter-spacing:2px}
+    .weather-desc{font-size:11px;color:var(--muted2);margin-top:2px}
+    .weather-stats{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:8px}
+    .weather-stat{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted)}
+    .weather-stat span{color:var(--text)}
+    .signals{padding:10px 14px;display:flex;flex-direction:column;gap:7px}
+    .sigrow{display:flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted)}
+    .dot{width:6px;height:6px;border-radius:50%}
+    .dot.green{background:var(--green)} .dot.amber{background:var(--amber)}
+
+    .trigger{
+      position:fixed;right:20px;bottom:20px;z-index:20;display:none
+    }
+    .trigger.show{display:block}
+    .trigger .drop{
+      position:absolute;right:0;bottom:calc(100% + 6px);width:320px;display:none;flex-direction:column;
+      background:rgba(13,20,32,.98);border:1px solid var(--line);box-shadow:var(--shadow)
+    }
+    .trigger .drop.open{display:flex}
+    .toptitle{padding:10px 14px;border-bottom:1px solid var(--line);font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
+    .triggeropt{padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+    .triggeropt:hover{background:rgba(249,115,22,.08)}
+    .triggeropt:last-child{border-bottom:none}
+    .tn{font-weight:700;font-size:13px;margin-bottom:3px}
+    .td{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted)}
+    .status{padding:8px 14px;border-top:1px solid var(--line);display:none;align-items:center;gap:10px;color:var(--orange);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:1px;background:rgba(249,115,22,.06)}
+    .status.show{display:flex}
+    #toast{
+      position:fixed;right:20px;bottom:84px;z-index:30;display:none;
+      background:rgba(13,20,32,.98);border:1px solid var(--green);border-left:4px solid var(--green);
+      padding:14px 16px;max-width:380px;box-shadow:var(--shadow)
+    }
+    #toast.show{display:block}
+    .toast-title{font-weight:700;font-size:13px;color:var(--green);margin-bottom:5px}
+    .toast-body{font-size:12px;color:var(--muted2);line-height:1.55}
+
+    .nexus-popup .leaflet-popup-content-wrapper{background:var(--panel)!important;color:var(--text)!important;border:1px solid var(--line)!important;border-radius:2px!important}
+    .nexus-popup .leaflet-popup-tip{background:var(--panel)!important}
+    .node-title{font-weight:700;font-size:13px;margin-bottom:4px}
+    .node-type{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+    .node-row{display:flex;justify-content:space-between;gap:16px;font-size:12px;margin-bottom:3px}
+    .node-row span:last-child{font-family:'JetBrains Mono',monospace;font-size:11px}
+    @media (max-width:1180px){
+      .layout{grid-template-columns:300px 1fr}
+      .right{display:none!important}
+    }
+  </style>
+</head>
+<body>
+  <div class="frame"></div>
+
+  <div class="topbar">
+    <div class="brand">Nexus<span>Flow</span>™</div>
+    <div class="company">Predictive Supply Chain Intelligence</div>
+    <div class="spacer"></div>
+    <button class="toggle" id="modeBtn" onclick="toggleMode()"><span>⚡</span><span id="modeText">Expert View</span></button>
+    <a class="cta" href="index.html">Landing →</a>
+  </div>
+
+  <div class="banner">
+    <div class="stat"><div class="ico">⚠</div><div><div class="meta">Active Alerts</div><div class="value" id="valAlerts">—</div></div></div>
+    <div class="stat"><div class="ico">₹</div><div><div class="meta">Exposure at Risk</div><div class="value" id="valExposure">—</div></div></div>
+    <div class="stat"><div class="ico">♥</div><div><div class="meta" id="healthLabel">Chain Health</div><div class="value" id="valHealth">—</div></div></div>
+    <div class="stat" id="reroutedStat" style="display:none"><div class="ico">⟲</div><div><div class="meta">Routes Rerouted</div><div class="value green" id="valRerouted">—</div></div></div>
+  </div>
+
+  <div class="layout">
+    <aside class="left">
+      <div class="ticker" id="ticker"><div class="label">Intel</div><div class="text" id="tickerText">14 similar exporters already rerouted via Mundra in the last 4 hours · Average saving: ₹1.8 Cr each</div></div>
+      <div class="feed" id="feed">
+        <div class="empty" id="emptyState">
+          <div style="font-size:34px;opacity:.5">✓</div>
+          <div class="title">All Clear</div>
+          <div>No disruptions detected.<br>Your supply chain is operating normally.</div>
+        </div>
+      </div>
+    </aside>
+
+    <section class="center">
+      <div class="map-wrap">
+        <div id="map"></div>
+        <div class="processing" id="processing"><div class="spinner"></div><div>Processing signal — cascade calculating…</div></div>
+      </div>
+      <div class="graph" id="graphWrap">
+        <div class="label">Supply Chain Network · Live</div>
+        <canvas id="graphCanvas"></canvas>
+      </div>
+    </section>
+
+    <aside class="right" id="rightPanel">
+      <div class="section">
+        <div class="head">Disruption Timeline</div>
+        <div id="timeline"></div>
+      </div>
+      <div class="section">
+        <div class="head">Mumbai Weather</div>
+        <div class="weather">
+          <div class="weather-main">
+            <div style="font-size:30px">🌤</div>
+            <div>
+              <div class="weather-temp" id="wTemp">31°C</div>
+              <div class="weather-desc" id="wDesc">scattered clouds</div>
+            </div>
+          </div>
+          <div class="weather-stats">
+            <div class="weather-stat">Wind: <span id="wWind">28 km/h</span></div>
+            <div class="weather-stat">Humidity: <span id="wHumidity">74%</span></div>
+            <div class="weather-stat">Feels: <span id="wFeels">36°C</span></div>
+            <div class="weather-stat">Rain: <span id="wRain">0mm</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="section" style="flex:1">
+        <div class="head">Signal Sources</div>
+        <div class="signals">
+          <div class="sigrow"><span class="dot amber"></span>Weather API (IMD + OpenWeather)</div>
+          <div class="sigrow"><span class="dot amber"></span>AIS Vessel Tracking</div>
+          <div class="sigrow"><span class="dot amber"></span>GNews Intelligence</div>
+          <div class="sigrow" style="margin-top:6px;color:var(--amber)">Demo Mode Active</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="trigger" id="triggerPanel">
+    <div class="drop" id="triggerDrop">
+      <div class="toptitle">Trigger Demo Scenario</div>
+      <div class="triggeropt" onclick="triggerScenario('cyclone')">
+        <div class="tn">🌀 Cyclone Warning — Mumbai</div><div class="td">severity:4 · JNPT · weather · conf:0.95</div>
+      </div>
+      <div class="triggeropt" onclick="triggerScenario('strike')">
+        <div class="tn">⚓ Port Strike — JNPT</div><div class="td">severity:3 · JNPT · news · conf:0.70</div>
+      </div>
+      <div class="triggeropt" onclick="triggerScenario('redsea')">
+        <div class="tn">🌍 Red Sea Escalation</div><div class="td">severity:5 · Rotterdam · geopolitical · conf:0.70</div>
+      </div>
+      <div class="status" id="status"><div class="spinner"></div><div id="statusText">Firing signal…</div></div>
+    </div>
+    <button class="toggle" id="triggerBtn" onclick="toggleTrigger()"><span>⚡</span><span>Trigger Demo Scenario</span><span style="margin-left:auto">▲</span></button>
+  </div>
+
+  <div id="toast">
+    <div class="toast-title">✅ Route Accepted</div>
+    <div class="toast-body" id="toastBody"></div>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    const BACKEND_URL = window.NEXUSFLOW_BACKEND || 'http://localhost:8001';
+    const COMPANY_ID = 'auroratea';
+    let judgeMode = false;
+    let map, nodeMarkers = {}, routePolyline = null, graphNodes = [], graphEdges = [];
+    let graphRender = null;
+
+    const fmtInr = v => {
+      v = parseInt(v || 0, 10);
+      if (v >= 10000000) return `₹${(v/10000000).toFixed(1)}Cr`;
+      if (v >= 100000) return `₹${(v/100000).toFixed(1)}L`;
+      return `₹${v.toLocaleString()}`;
+    };
+    const riskColor = s => s >= 0.6 ? '#dc2626' : s >= 0.3 ? '#d97706' : '#16a34a';
+    const timeAgo = ts => {
+      const d = new Date(ts), s = Math.floor((Date.now()-d)/1000);
+      if (s < 60) return `${s}s ago`;
+      if (s < 3600) return `${Math.floor(s/60)}m ago`;
+      return `${Math.floor(s/3600)}h ago`;
+    };
+
+    function api(path, opts={}){ return fetch(BACKEND_URL + path, { headers:{'Content-Type':'application/json'}, ...opts }).then(r => r.ok ? r.json() : Promise.reject(r)); }
+
+    function toggleMode(){
+      judgeMode = !judgeMode;
+      document.getElementById('modeBtn').classList.toggle('active', judgeMode);
+      document.getElementById('modeText').textContent = judgeMode ? 'Simple View' : 'Expert View';
+      document.getElementById('reroutedStat').style.display = judgeMode ? 'flex' : 'none';
+      document.getElementById('healthLabel').textContent = judgeMode ? 'Resilience Score' : 'Chain Health';
+      document.getElementById('ticker').classList.toggle('show', judgeMode);
+      document.getElementById('rightPanel').classList.toggle('show', judgeMode);
+      document.getElementById('graphWrap').classList.toggle('show', judgeMode);
+      document.getElementById('triggerPanel').classList.toggle('show', judgeMode);
+      document.querySelectorAll('.confidence,.peer').forEach(el => el.classList.toggle('show', judgeMode));
+      setTimeout(() => map && map.invalidateSize(), 300);
+      if (judgeMode) { loadWeather(); loadTimeline(); drawGraph(); }
+    }
+
+    function toggleTrigger(){
+      document.getElementById('triggerDrop').classList.toggle('open');
+    }
+
+    function initMap(){
+      map = L.map('map', { center:[20.5937,78.9629], zoom:5, zoomControl:true, attributionControl:false });
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:19, subdomains:'abcd' }).addTo(map);
+    }
+
+    function createMarkerIcon(node){
+      const c = riskColor(node.risk_score || 0);
+      const size = (node.risk_score || 0) >= 0.6 ? 16 : 12;
+      return L.divIcon({
+        html:`<div style="width:${size}px;height:${size}px;background:${c};border:2px solid ${c};border-radius:50%;box-shadow:0 0 0 4px ${c}33"></div>`,
+        className:'', iconSize:[size+8,size+8], iconAnchor:[(size+8)/2,(size+8)/2]
+      });
+    }
+
+    function renderNodes(nodes){
+      graphNodes = nodes || [];
+      Object.values(nodeMarkers).forEach(m => map.removeLayer(m));
+      nodeMarkers = {};
+      graphNodes.forEach(node => {
+        if (!node.lat || !node.lng) return;
+        const m = L.marker([node.lat, node.lng], { icon:createMarkerIcon(node) }).addTo(map);
+        m.bindPopup(`
+          <div style="font-family:Barlow,sans-serif;min-width:180px">
+            <div class="node-title">${node.name}</div>
+            <div class="node-type">${node.type || node.node_type || ''}</div>
+            <div class="node-row"><span style="color:var(--muted)">Risk Score</span><span style="color:${riskColor(node.risk_score || 0)}">${((node.risk_score||0)*100).toFixed(0)}%</span></div>
+            <div class="node-row"><span style="color:var(--muted)">Active Shipment</span><span>${fmtInr(node.active_shipment_value_inr || 0)}</span></div>
+            <div class="node-row"><span style="color:var(--muted)">Exposure</span><span>${fmtInr(node.financial_exposure_inr || 0)}</span></div>
+          </div>
+        `, { className:'nexus-popup' });
+        nodeMarkers[node.id] = m;
+      });
+    }
+
+    function drawRoutePolyline(polyline){
+      if (routePolyline) map.removeLayer(routePolyline);
+      if (!polyline || !polyline.length) return;
+      routePolyline = L.polyline(polyline.map(p => [p.lat, p.lng]), {
+        color:'#16a34a', weight:2, dashArray:'8, 6', opacity:.85
+      }).addTo(map);
+    }
+
+    function drawGraph(){
+      const canvas = document.getElementById('graphCanvas');
+      const wrap = document.getElementById('graphWrap');
+      if (!canvas || !wrap || !graphNodes.length) return;
+      canvas.width = wrap.clientWidth;
+      canvas.height = wrap.clientHeight;
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      const pos = {};
+      const n = graphNodes.length || 1;
+      graphNodes.forEach((node,i) => {
+        const a = (i/n) * Math.PI*2 - Math.PI/2;
+        const r = Math.min(W,H) * 0.28;
+        pos[node.id] = { x: W/2 + Math.cos(a)*r, y: H/2 + Math.sin(a)*r };
+      });
+      graphRender = function(highlightId=null){
+        ctx.clearRect(0,0,W,H);
+        (graphEdges || []).forEach(edge => {
+          const s = pos[edge.source], t = pos[edge.target];
+          if (!s || !t) return;
+          ctx.beginPath(); ctx.moveTo(s.x,s.y); ctx.lineTo(t.x,t.y);
+          ctx.strokeStyle = '#1e2d45'; ctx.lineWidth = Math.max(1, Math.min(4, (edge.shipment_value_inr || 0) / 5000000)); ctx.stroke();
+        });
+        graphNodes.forEach(node => {
+          const p = pos[node.id]; if (!p) return;
+          const c = riskColor(node.risk_score || 0);
+          const size = Math.max(7, Math.min(18, (node.active_shipment_value_inr || 0) / 1000000));
+          if (highlightId === node.id){
+            ctx.beginPath(); ctx.arc(p.x,p.y,size+10,0,Math.PI*2); ctx.fillStyle = c + '33'; ctx.fill();
+          }
+          ctx.beginPath(); ctx.arc(p.x,p.y,size,0,Math.PI*2); ctx.fillStyle = c; ctx.strokeStyle = '#2a4262'; ctx.lineWidth = 1; ctx.fill(); ctx.stroke();
+          ctx.fillStyle = '#eaf0f7'; ctx.font = '10px JetBrains Mono'; ctx.textAlign = 'center'; ctx.fillText(node.name || '', p.x, p.y + size + 14);
+        });
+      };
+      graphRender();
+    }
+
+    async function animateCascade(path){
+      if (!graphRender || !path || !path.length) return;
+      for (const id of path){
+        await new Promise(r => setTimeout(r, 430));
+        graphRender(id);
+      }
+      await new Promise(r => setTimeout(r, 700));
+      graphRender(null);
+    }
+
+    function buildCard(alert){
+      const sig = alert.signal_type || 'weather';
+      const sev = alert.severity || 1;
+      const card = document.createElement('div');
+      card.className = `card ${sig} sev-${sev}`;
+      card.dataset.alertId = alert.id;
+      const suggestions = (alert.decision_card && alert.decision_card.options) || alert.rerouting_suggestions || [];
+      const reroute = suggestions.filter(s => s.label !== 'Wait & Monitor');
+      const wait = suggestions.find(s => s.label === 'Wait & Monitor' || s.warning);
+
+      let rerouteHtml = '';
+      if (reroute.length){
+        rerouteHtml += `<div style="padding:10px 12px;border-top:1px solid var(--line)">
+          <div class="smallk" style="margin-bottom:8px">Rerouting Options</div>`;
+        reroute.forEach((o, i) => {
+          const recommended = !!o.recommended;
+          rerouteHtml += `
+            <div class="option-box ${recommended ? 'accepted-route' : ''}" onclick="acceptRoute(this,'${(o.label||'').replace(/'/g,"\\'")}')">
+              <div class="option-name">${o.label || o.route_name || `Route ${i+1}`}</div>
+              <div class="option-stats">
+                <div>ETA <span>${o.eta || o.delta_hours || '—'}</span></div>
+                <div class="save">Savings <span>${o.savings_formatted || fmtInr(o.savings_inr || 0)}</span></div>
+                <div>Confidence <span>${Math.round((o.confidence || o.conf || 0)*100)}%</span></div>
+              </div>
+            </div>`;
+        });
+        rerouteHtml += `</div>`;
+      }
+      if (wait){
+        rerouteHtml += `<div style="padding:10px 12px;border-top:1px solid var(--line)"><div class="option-box" style="border-color:rgba(220,38,38,.25);background:rgba(220,38,38,.08)"><div class="option-name" style="color:var(--red)">Wait & Monitor</div><div class="option-stats"><div>Delay <span>${wait.delay || '—'}</span></div></div></div></div>`;
+      }
+      card.innerHTML = `
+        <div class="head">
+          <div class="sig">${({weather:'🌧', port_congestion:'⚓', news:'📰', geopolitical:'🌍'})[sig] || '⚠'}</div>
+          <div style="min-width:0;flex:1">
+            <div class="type ${sig}">${sig.replace(/_/g,' ')}</div>
+            <div class="place">${alert.location || alert.title || 'Unknown'}</div>
+            <div class="time">${timeAgo(alert.created_at || new Date().toISOString())}</div>
+          </div>
+        </div>
+        <div class="severity">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);flex:none">Severity</div>
+          <div class="sev-bits">${'<span></span>'.repeat(5)}</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted);flex:none">${sev}/5</div>
+        </div>
+        <div class="money">
+          <div><div class="k">Exposure</div><div class="v red">${fmtInr(alert.exposure_inr || alert.financial_exposure_inr || 0)}</div></div>
+          <div><div class="k">Impact</div><div class="v amber">${fmtInr(alert.impact_inr || alert.estimated_loss_inr || 0)}</div></div>
+        </div>
+        <div class="body">${alert.summary || alert.description || alert.message || 'Supply chain signal detected.'}</div>
+        <div class="peer ${judgeMode ? 'show' : ''}">${alert.peer_intel ? `<div class="smallk">Peer Intelligence</div>${alert.peer_intel}` : ''}</div>
+        <div class="confidence ${judgeMode ? 'show' : ''}">${alert.confidence_reason ? `<div class="smallk">Confidence</div>${alert.confidence_reason}` : ''}</div>
+        ${rerouteHtml}
+      `;
+      return card;
+    }
+
+    function acceptRoute(btn, name){
+      document.querySelectorAll('.option-box').forEach(x => x.classList.remove('accepted-route'));
+      btn.classList.add('accepted-route');
+      document.getElementById('toastBody').textContent = `${name} accepted. The route has been marked as preferred and the chain health will update after the reroute event.`;
+      document.getElementById('toast').classList.add('show');
+      setTimeout(() => document.getElementById('toast').classList.remove('show'), 3200);
+    }
+
+    async function loadSummary(){
+      try{
+        const data = await api(`/api/dashboard/summary?company_id=${COMPANY_ID}`);
+        document.getElementById('valAlerts').textContent = data.active_alerts ?? '0';
+        document.getElementById('valExposure').textContent = fmtInr(data.exposure_at_risk_inr ?? 0);
+        document.getElementById('valHealth').textContent = `${data.health_score ?? 0}`;
+        document.getElementById('valRerouted').textContent = data.routes_rerouted ?? 0;
+      }catch(e){
+        document.getElementById('valAlerts').textContent = '3';
+        document.getElementById('valExposure').textContent = '₹2.3Cr';
+        document.getElementById('valHealth').textContent = '84';
+        document.getElementById('valRerouted').textContent = '2';
+      }
+    }
+
+    async function loadAlerts(){
+      const feed = document.getElementById('feed');
+      feed.innerHTML = '';
+      try{
+        const data = await api(`/api/alerts/active?company_id=${COMPANY_ID}`);
+        const alerts = Array.isArray(data) ? data : (data.alerts || []);
+        if (!alerts.length){
+          feed.innerHTML = document.getElementById('emptyState').outerHTML;
+        }else{
+          alerts.forEach(a => feed.appendChild(buildCard(a)));
+        }
+      }catch(e){
+        const demo = [
+          {id:'1',signal_type:'weather',location:'JNPT Port Cluster',severity:4,exposure_inr:12300000,impact_inr:6200000,summary:'Cyclone warning can delay gate-in and port movement.',created_at:new Date().toISOString(), confidence_reason:'Weather model overlap across IMD + wind forecast.', peer_intel:'14 peers already rerouted via Mundra.'},
+          {id:'2',signal_type:'news',location:'Mumbai Dispatch Corridor',severity:3,exposure_inr:7400000,impact_inr:2100000,summary:'Local disruption may affect outbound schedules.',created_at:new Date().toISOString()},
+        ];
+        demo.forEach(a => feed.appendChild(buildCard(a)));
+      }
+    }
+
+    async function loadWeather(){
+      try{
+        const w = await api(`/api/weather/mumbai`);
+        document.getElementById('wTemp').textContent = `${w.temp_c ?? 31}°C`;
+        document.getElementById('wDesc').textContent = w.description || 'scattered clouds';
+        document.getElementById('wWind').textContent = `${w.wind_kmh ?? 28} km/h`;
+        document.getElementById('wHumidity').textContent = `${w.humidity_pct ?? 74}%`;
+        document.getElementById('wFeels').textContent = `${w.feels_like_c ?? 36}°C`;
+        document.getElementById('wRain').textContent = `${w.rain_mm ?? 0}mm`;
+      }catch(e){}
+    }
+
+    async function loadTimeline(){
+      const list = document.getElementById('timeline');
+      list.innerHTML = '';
+      try{
+        const data = await api(`/api/disruptions/history?company_id=${COMPANY_ID}`);
+        const items = Array.isArray(data) ? data : (data.items || []);
+        items.slice(0, 8).forEach(x => {
+          const el = document.createElement('div');
+          el.className = 'tl';
+          el.innerHTML = `
+            <div class="tl-top"><div class="tl-type">${(x.signal_type || 'event').replace(/_/g,' ')}</div><div class="tl-time">${timeAgo(x.created_at || new Date().toISOString())}</div></div>
+            <div class="tl-desc">${x.description || x.summary || 'Network event recorded.'}</div>`;
+          list.appendChild(el);
+        });
+      }catch(e){
+        list.innerHTML = '<div class="tl"><div class="tl-top"><div class="tl-type">demo</div><div class="tl-time">now</div></div><div class="tl-desc">Trigger a scenario to populate the timeline.</div></div>';
+      }
+    }
+
+    async function triggerScenario(scenario){
+      const status = document.getElementById('status');
+      const text = document.getElementById('statusText');
+      status.classList.add('show');
+      text.textContent = 'Firing signal…';
+      try{
+        await api(`/api/trigger/${scenario}`, { method:'POST' });
+        text.textContent = 'Signal sent. Waiting for cascade…';
+        await new Promise(r => setTimeout(r, 900));
+        await loadSummary();
+        await loadAlerts();
+        await loadTimeline();
+        status.classList.remove('show');
+      }catch(e){
+        text.textContent = 'Demo signal failed — using local fallback.';
+        status.classList.remove('show');
+      }
+    }
+
+    async function bootstrap(){
+      initMap();
+      await Promise.all([loadSummary(), loadAlerts()]);
+      try{
+        const nodes = await api('/api/graph/auroratea');
+        renderNodes(nodes.nodes || nodes || []);
+        graphEdges = nodes.edges || [];
+      }catch(e){
+        renderNodes([
+          {id:'mumbai',name:'Mumbai',lat:19.076,lng:72.8777,risk_score:.35,active_shipment_value_inr:5500000,financial_exposure_inr:1200000},
+          {id:'jnpt',name:'JNPT',lat:18.946,lng:72.946, risk_score:.72,active_shipment_value_inr:8200000,financial_exposure_inr:3300000},
+          {id:'mundra',name:'Mundra',lat:22.839,lng:69.721, risk_score:.16,active_shipment_value_inr:4600000,financial_exposure_inr:700000},
+          {id:'delhi',name:'Delhi',lat:28.6139,lng:77.2090, risk_score:.12,active_shipment_value_inr:6100000,financial_exposure_inr:900000}
+        ]);
+        graphEdges = [
+          {source:'mumbai',target:'jnpt',shipment_value_inr:5200000},
+          {source:'jnpt',target:'mundra',shipment_value_inr:3100000},
+          {source:'mumbai',target:'delhi',shipment_value_inr:2700000}
+        ];
+      }
+      drawGraph();
+      window.addEventListener('resize', () => { map && map.invalidateSize(); if (judgeMode) drawGraph(); });
+    }
+
+    bootstrap();
+  </script>
+</body>
+</html>

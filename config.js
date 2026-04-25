@@ -1,0 +1,3 @@
+window.NEXUSFLOW_BACKEND = 'http://localhost:8001';
+window.NEXUSFLOW_SUPABASE_URL = window.NEXUSFLOW_SUPABASE_URL || '';
+window.NEXUSFLOW_SUPABASE_KEY = window.NEXUSFLOW_SUPABASE_KEY || '';

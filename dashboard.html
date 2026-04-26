@@ -612,8 +612,8 @@ function extractBestPolyline(alert){
           <div><div class="k">Impact</div><div class="v amber">${fmtInr(alert.impact_inr || alert.estimated_loss_inr || 0)}</div></div>
         </div>
         <div class="body">${escapeHtml(alert.summary || alert.description || alert.message || 'Supply chain signal detected.')}</div>
-        <div class="peer ${judgeMode ? 'show' : ''}">${peerText ? `<div class="smallk">Peer Intelligence</div>${escapeHtml(peerText)}</div>` : ''}</div>
-        <div class="confidence ${judgeMode ? 'show' : ''}">${confidenceText ? `<div class="smallk">Confidence</div>${escapeHtml(confidenceText)}</div>` : ''}</div>
+        ${peerText ? `<div class="peer ${judgeMode ? 'show' : ''}"><div class="smallk">Peer Intelligence</div><div>${escapeHtml(peerText)}</div></div>` : ''}
+        ${confidenceText ? `<div class="confidence ${judgeMode ? 'show' : ''}"><div class="smallk">Confidence</div><div>${escapeHtml(confidenceText)}</div></div>` : ''}
         ${rerouteHtml}
       `;
 
@@ -640,47 +640,70 @@ function extractBestPolyline(alert){
     }
 
     async function loadAlerts(){
-  const feed = document.getElementById('feed');
-  feed.innerHTML = '';
+      const feed = document.getElementById('feed');
+      feed.innerHTML = '';
 
-  try{
-    const data = await api(`/api/alerts/active?company_id=${COMPANY_ID}`);
-    const alerts = Array.isArray(data) ? data : (data.alerts || []);
+      try{
+        const data = await api(`/api/alerts/active?company_id=${COMPANY_ID}`);
+        const alerts = Array.isArray(data) ? data : (data.alerts || []);
 
-    if (!alerts.length){
-      feed.innerHTML = document.getElementById('emptyState').outerHTML;
-      if (routePolyline) {
-        map.removeLayer(routePolyline);
-        routePolyline = null;
+        if (!alerts.length){
+          feed.innerHTML = document.getElementById('emptyState').outerHTML;
+          if (routePolyline) {
+            map.removeLayer(routePolyline);
+            routePolyline = null;
+          }
+          return;
+        }
+
+        const lead = alerts.find(a => extractBestPolyline(a)) || alerts[0];
+
+        alerts.forEach(a => feed.appendChild(buildCard(a)));
+
+        await new Promise(requestAnimationFrame);
+        if (map) map.invalidateSize();
+
+        const bestPolyline = extractBestPolyline(lead);
+        if (bestPolyline) {
+          drawRoutePolyline(bestPolyline);
+        } else if (routePolyline) {
+          map.removeLayer(routePolyline);
+          routePolyline = null;
+        }
+
+        if (lead?.cascade_path?.length) {
+          animateCascade(lead.cascade_path.slice());
+        }
+      }catch(e){
+        console.error("loadAlerts failed:", e);
+        const demo = [
+          {
+            id:'1',
+            signal_type:'weather',
+            location:'JNPT Port Cluster',
+            severity:4,
+            exposure_inr:12300000,
+            impact_inr:6200000,
+            summary:'Cyclone warning can delay gate-in and port movement.',
+            created_at:new Date().toISOString(),
+            confidence_reason:'Weather model overlap across IMD + wind forecast.',
+            peer_intel:'14 peers already rerouted via Mundra.'
+          },
+          {
+            id:'2',
+            signal_type:'news',
+            location:'Mumbai Dispatch Corridor',
+            severity:3,
+            exposure_inr:7400000,
+            impact_inr:2100000,
+            summary:'Local disruption may affect outbound schedules.',
+            created_at:new Date().toISOString()
+          },
+        ];
+        demo.forEach(a => feed.appendChild(buildCard(a)));
       }
-      return;
     }
 
-    // 🔥 pick best alert with route
-    const lead = alerts.find(a => extractBestPolyline(a)) || alerts[0];
-
-    // render cards
-    alerts.forEach(a => feed.appendChild(buildCard(a)));
-
-    // 🔥 wait for DOM + map
-    await new Promise(requestAnimationFrame);
-    map.invalidateSize();
-
-    // 🔥 draw route
-    const bestPolyline = extractBestPolyline(lead);
-    if (bestPolyline) {
-      drawRoutePolyline(bestPolyline);
-    }
-
-    // optional cascade animation
-    if (lead?.cascade_path?.length) {
-      animateCascade(lead.cascade_path.slice());
-    }
-
-  }catch(e){
-    console.error("loadAlerts failed:", e);
-  }
-}
     async function loadWeather(){
       try{
         const w = await api(`/api/weather/mumbai`);

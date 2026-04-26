@@ -296,7 +296,7 @@
 
   <script src="config.js"></script>
   <script>
-    const BACKEND_URL = window.NEXUSFLOW_BACKEND || 'https://nexusflow-xj19.onrender.com';
+    const BACKEND_URL = window.NEXUSFLOW_BACKEND || 'http://localhost:8001';
     const COMPANY_ID = 'auroratea';
     let judgeMode = false;
     let map, nodeMarkers = {}, routePolyline = null, graphNodes = [], graphEdges = [];
@@ -308,19 +308,17 @@
       if (v >= 100000) return `₹${(v/100000).toFixed(1)}L`;
       return `₹${v.toLocaleString()}`;
     };
-
-    function extractBestPolyline(alert){
-      const options = alert?.decision_card?.options || [];
-      for (const opt of options) {
-        if (Array.isArray(opt.polyline) && opt.polyline.length) return opt.polyline;
-      }
-      const reroutes = alert?.rerouting_suggestions || [];
-      for (const opt of reroutes) {
-        if (Array.isArray(opt.polyline) && opt.polyline.length) return opt.polyline;
-      }
-      return null;
-    }
-
+function extractBestPolyline(alert){
+  const options = alert?.decision_card?.options || [];
+  for (const opt of options) {
+    if (Array.isArray(opt.polyline) && opt.polyline.length) return opt.polyline;
+  }
+  const reroutes = alert?.rerouting_suggestions || [];
+  for (const opt of reroutes) {
+    if (Array.isArray(opt.polyline) && opt.polyline.length) return opt.polyline;
+  }
+  return null;
+}
     const riskColor = s => s >= 0.6 ? '#dc2626' : s >= 0.3 ? '#d97706' : '#16a34a';
 
     const timeAgo = ts => {
@@ -414,33 +412,33 @@
     }
 
     function drawRoutePolyline(polyline){
-      if (routePolyline) {
-        map.removeLayer(routePolyline);
-        routePolyline = null;
-      }
+  if (routePolyline) {
+    map.removeLayer(routePolyline);
+    routePolyline = null;
+  }
 
-      if (!polyline || !polyline.length || !map) return;
+  if (!polyline || !polyline.length || !map) return;
 
-      const latlngs = polyline
-        .map(p => [Number(p.lat), Number(p.lng)])
-        .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  const latlngs = polyline
+    .map(p => [Number(p.lat), Number(p.lng)])
+    .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
 
-      if (!latlngs.length) return;
+  if (!latlngs.length) return;
 
-      routePolyline = L.polyline(latlngs, {
-        color:'#f97316',
-        weight:5,
-        opacity:0.95
-      }).addTo(map);
+  routePolyline = L.polyline(latlngs, {
+    color:'#f97316',
+    weight:5,
+    opacity:0.95
+  }).addTo(map);
 
-      routePolyline.bringToFront();
+  routePolyline.bringToFront();
 
-      if (latlngs.length === 1) {
-        map.setView(latlngs[0], Math.max(map.getZoom(), 7));
-      } else {
-        map.fitBounds(latlngs, { padding: [50, 50] });
-      }
-    }
+  if (latlngs.length === 1) {
+    map.setView(latlngs[0], Math.max(map.getZoom(), 7));
+  } else {
+    map.fitBounds(latlngs, { padding: [50, 50] });
+  }
+}
 
     function drawGraph(){
       const canvas = document.getElementById('graphCanvas');
@@ -614,8 +612,8 @@
           <div><div class="k">Impact</div><div class="v amber">${fmtInr(alert.impact_inr || alert.estimated_loss_inr || 0)}</div></div>
         </div>
         <div class="body">${escapeHtml(alert.summary || alert.description || alert.message || 'Supply chain signal detected.')}</div>
-        ${peerText ? `<div class="peer ${judgeMode ? 'show' : ''}"><div class="smallk">Peer Intelligence</div><div>${escapeHtml(peerText)}</div></div>` : ''}
-        ${confidenceText ? `<div class="confidence ${judgeMode ? 'show' : ''}"><div class="smallk">Confidence</div><div>${escapeHtml(confidenceText)}</div></div>` : ''}
+        <div class="peer ${judgeMode ? 'show' : ''}">${peerText ? `<div class="smallk">Peer Intelligence</div>${escapeHtml(peerText)}</div>` : ''}</div>
+        <div class="confidence ${judgeMode ? 'show' : ''}">${confidenceText ? `<div class="smallk">Confidence</div>${escapeHtml(confidenceText)}</div>` : ''}</div>
         ${rerouteHtml}
       `;
 
@@ -642,45 +640,47 @@
     }
 
     async function loadAlerts(){
-      const feed = document.getElementById('feed');
-      feed.innerHTML = '';
+  const feed = document.getElementById('feed');
+  feed.innerHTML = '';
 
-      try{
-        const data = await api(`/api/alerts/active?company_id=${COMPANY_ID}`);
-        const alerts = Array.isArray(data) ? data : (data.alerts || []);
+  try{
+    const data = await api(`/api/alerts/active?company_id=${COMPANY_ID}`);
+    const alerts = Array.isArray(data) ? data : (data.alerts || []);
 
-        if (!alerts.length){
-          feed.innerHTML = document.getElementById('emptyState').outerHTML;
-          if (routePolyline) {
-            map.removeLayer(routePolyline);
-            routePolyline = null;
-          }
-          return;
-        }
-
-        const lead = alerts.find(a => extractBestPolyline(a)) || alerts[0];
-
-        alerts.forEach(a => feed.appendChild(buildCard(a)));
-
-        await new Promise(requestAnimationFrame);
-        if (map) map.invalidateSize();
-
-        const bestPolyline = extractBestPolyline(lead);
-        if (bestPolyline) {
-          drawRoutePolyline(bestPolyline);
-        } else if (routePolyline) {
-          map.removeLayer(routePolyline);
-          routePolyline = null;
-        }
-
-        if (lead?.cascade_path?.length) {
-          animateCascade(lead.cascade_path.slice());
-        }
-      }catch(e){
-        console.error("loadAlerts failed:", e);
+    if (!alerts.length){
+      feed.innerHTML = document.getElementById('emptyState').outerHTML;
+      if (routePolyline) {
+        map.removeLayer(routePolyline);
+        routePolyline = null;
       }
+      return;
     }
 
+    // 🔥 pick best alert with route
+    const lead = alerts.find(a => extractBestPolyline(a)) || alerts[0];
+
+    // render cards
+    alerts.forEach(a => feed.appendChild(buildCard(a)));
+
+    // 🔥 wait for DOM + map
+    await new Promise(requestAnimationFrame);
+    map.invalidateSize();
+
+    // 🔥 draw route
+    const bestPolyline = extractBestPolyline(lead);
+    if (bestPolyline) {
+      drawRoutePolyline(bestPolyline);
+    }
+
+    // optional cascade animation
+    if (lead?.cascade_path?.length) {
+      animateCascade(lead.cascade_path.slice());
+    }
+
+  }catch(e){
+    console.error("loadAlerts failed:", e);
+  }
+}
     async function loadWeather(){
       try{
         const w = await api(`/api/weather/mumbai`);

@@ -14,13 +14,18 @@ Card structure:
   │  Storm signal (95%) + Port congestion (88%) + 3 news (70%) │
   │  PEER: 14 similar exporters already rerouted via Mundra  │
   ├──────────────────────────────────────────────────────────┤
-  │  [1] Mundra  +18h  +₹40K  Saves ₹1.9Cr                 │
+  │  [1] Mundra  +18h  +₹40K  Saves ₹1.9Cr   ← RECOMMENDED │
   │  [2] Chennai +38h  +₹60K  Saves ₹1.6Cr                 │
   │  [3] Wait    —     —      Full ₹2.3Cr still at risk     │
   └──────────────────────────────────────────────────────────┘
 
 Key insight: showing the COST OF WAITING makes inaction a visible choice.
 Most tools only show the cost of action. NexusFlow shows the cost of WAITING.
+
+FIX v2.1:
+  - Each option now carries polyline (lat/lng waypoints) for map drawing.
+  - First rerouting option is marked recommended=True so frontend auto-highlights
+    it and auto-draws the orange route on map load (no click required).
 """
 
 import logging
@@ -42,6 +47,9 @@ def build_decision_card(alert: dict) -> dict:
 
     Returns:
         Complete Decision Card dict ready for JSON serialization.
+        Each rerouting option includes:
+          - polyline: [{lat, lng}, ...] waypoints for map drawing
+          - recommended: True on the first (best) option only
     """
     location       = (alert.get("affected_location") or "").strip()
     total_exposure = max(0, int(alert.get("total_financial_exposure_inr") or 0))
@@ -59,18 +67,30 @@ def build_decision_card(alert: dict) -> dict:
         risk_reduction = float(suggestion.get("risk_reduction_percent") or 0)
         saves_inr      = max(0, int(total_exposure * (risk_reduction / 100.0)))
 
+        # FIX: mark the first (lowest-risk) rerouting option as recommended.
+        # This causes the frontend to:
+        #   1. Pre-highlight the option box with accepted-route CSS class.
+        #   2. extractBestPolyline() finds it immediately and draws the map route
+        #      on initial load — no user click required.
+        is_recommended = (idx == 1)
+
         options.append({
             "id":                     idx,
             "label":                  suggestion["alternative_route"],
             "time_delta_hours":       suggestion["time_delta_hours"],
+            "eta":                    f"+{suggestion['time_delta_hours']}h",
             "cost_delta_inr":         suggestion["cost_delta_inr"],
             "cost_delta_formatted":   _fmt_inr(suggestion["cost_delta_inr"]),
             "saves_inr":              saves_inr,
             "saves_formatted":        _fmt_inr(saves_inr),
+            "savings_formatted":      _fmt_inr(saves_inr),   # alias for frontend fallback
             "risk_reduction_percent": risk_reduction,
             "confidence_score":       suggestion["confidence_score"],
             "recommendation_text":    suggestion["recommendation_text"],
+            # FIX: polyline carried through so frontend can draw map route
             "polyline":               suggestion.get("polyline", []),
+            # FIX: recommended flag drives auto-highlight + auto-draw
+            "recommended":            is_recommended,
         })
 
     # Always add "Wait & Monitor" last — makes cost of inaction explicit
@@ -78,15 +98,18 @@ def build_decision_card(alert: dict) -> dict:
         "id":                     len(options) + 1,
         "label":                  "Wait & Monitor",
         "time_delta_hours":       0,
+        "eta":                    "—",
         "cost_delta_inr":         0,
         "cost_delta_formatted":   "₹0",
         "saves_inr":              0,
         "saves_formatted":        "₹0",
+        "savings_formatted":      "₹0",
         "risk_reduction_percent": 0,
         "confidence_score":       1.0,
         "recommendation_text":    f"Take no action. Full {_fmt_inr(total_exposure)} remains at risk.",
         "warning":                f"Full {_fmt_inr(total_exposure)} still at risk",
         "polyline":               [],
+        "recommended":            False,
     })
 
     return {

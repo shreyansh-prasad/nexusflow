@@ -13,6 +13,12 @@ Endpoints:
 INTEGRATION FOR PERSON A — add these 2 lines to your main.py:
   from graph_router import router as graph_router
   app.include_router(graph_router)
+
+FIX v2.1:
+  - _run_cascade_and_save now includes "polyline" in every rerouting_suggestions row.
+    Without this, get_rerouting_for_alert() returned rows with no polyline, so
+    extractBestPolyline() on the frontend always returned null and the map orange
+    route line never appeared.
 """
 
 import logging
@@ -34,8 +40,8 @@ from db_client import (
     update_node_risk_scores,
 )
 
-logger     = logging.getLogger(__name__)
-router     = APIRouter(prefix="/api", tags=["NexusFlow Graph & AI"])
+logger       = logging.getLogger(__name__)
+router       = APIRouter(prefix="/api", tags=["NexusFlow Graph & AI"])
 _recommender = RerouteRecommender()
 
 
@@ -153,7 +159,7 @@ def get_cascade(disruption_event_id: str):
 def get_active_alerts_endpoint(company_id: str = "auroratea"):
     """
     Returns all active alerts enriched with:
-      - rerouting_suggestions (from DB)
+      - rerouting_suggestions (from DB, now includes polyline)
       - decision_card         (60-Second Decision Card, v2.0 killer feature)
 
     Person C's dashboard main feed reads this for initial load.
@@ -170,13 +176,13 @@ def get_active_alerts_endpoint(company_id: str = "auroratea"):
     for alert in alerts:
         alert_id = alert.get("id")
 
-        # Attach rerouting suggestions from DB
+        # Attach rerouting suggestions from DB (now includes polyline column)
         try:
             alert["rerouting_suggestions"] = get_rerouting_for_alert(alert_id)
         except Exception:
             alert["rerouting_suggestions"] = []
 
-        # Build 60-Second Decision Card
+        # Build 60-Second Decision Card (options include polyline + recommended flag)
         try:
             alert["decision_card"] = build_decision_card(alert)
         except Exception as exc:
@@ -233,6 +239,7 @@ def get_rerouting(alert_id: str):
     """
     Returns rerouting suggestions for a specific alert.
     Checks DB first (persisted when cascade ran), falls back to recommender.
+    Both paths now return polyline data.
     """
     alert = get_alert_by_id(alert_id)
     if not alert:
@@ -241,10 +248,10 @@ def get_rerouting(alert_id: str):
             detail=f"Alert '{alert_id}' not found"
         )
 
-    # Try DB first (persisted suggestions from cascade run)
+    # Try DB first (persisted suggestions from cascade run, now includes polyline)
     suggestions = get_rerouting_for_alert(alert_id)
 
-    # Fallback: generate in-memory from recommender
+    # Fallback: generate in-memory from recommender (always has polyline)
     if not suggestions:
         location    = alert.get("affected_location", "")
         suggestions = _recommender.get_suggestions({"affected_location": location})
@@ -309,6 +316,10 @@ def _run_cascade_and_save(event: dict) -> None:
     Full cascade pipeline as a background task:
       build_graph → CascadeCalculator → insert_alert → insert_rerouting → update_node_scores
 
+    FIX v2.1: rerouting suggestion rows now include "polyline" so the DB stores
+    the lat/lng waypoints. get_rerouting_for_alert() then returns them, and
+    extractBestPolyline() on the frontend can draw the orange map route.
+
     Called by:
       1. /api/internal/process/{id} endpoint (Person A pushes events)
       2. poller.py (polls every 5 seconds for unprocessed events)
@@ -370,7 +381,7 @@ def _run_cascade_and_save(event: dict) -> None:
         alert_id = saved_alert["id"]
         logger.info(f"[CASCADE] Alert saved: {alert_id[:8]}")
 
-        # ── Save rerouting suggestions ─────────────────────────────────────────
+        # ── Save rerouting suggestions ────────────────────────────────────────
         suggestions = _recommender.get_suggestions({"affected_location": location})
         if suggestions:
             rows = [
@@ -383,11 +394,13 @@ def _run_cascade_and_save(event: dict) -> None:
                     "risk_reduction_percent": s["risk_reduction_percent"],
                     "confidence_score":       s["confidence_score"],
                     "recommendation_text":    s["recommendation_text"],
+                    # FIX: persist polyline so frontend can draw map routes from DB data
+                    "polyline":               s.get("polyline", []),
                 }
                 for s in suggestions
             ]
             insert_rerouting_suggestions(rows)
-            logger.info(f"[CASCADE] Saved {len(rows)} rerouting suggestions")
+            logger.info(f"[CASCADE] Saved {len(rows)} rerouting suggestions (with polylines)")
 
         # ── Update node risk scores → Person C's map re-colors ─────────────────
         update_node_risk_scores(results)

@@ -10,6 +10,12 @@ Run alongside the FastAPI server in a SEPARATE terminal:
   Terminal 2:  python poller.py
 
 Idempotent — checks alerts table to avoid reprocessing. Safe to restart.
+
+FIX v2.1:
+  - insert_rerouting_suggestions rows now include "polyline" key.
+    Previously polyline was dropped here, so DB rows had no waypoints,
+    and get_rerouting_for_alert() returned suggestions without polyline,
+    making extractBestPolyline() on the frontend always return null.
 """
 
 import os
@@ -109,6 +115,10 @@ def process_event(event: dict) -> bool:
         alert_id = saved_alert["id"]
 
         # Save rerouting suggestions
+        # FIX: include "polyline" in each row so the DB stores lat/lng waypoints.
+        # Previously this key was omitted, causing get_rerouting_for_alert() to
+        # return suggestions with no polyline, and the frontend map never drew
+        # the orange rerouting line.
         suggestions = _recommender.get_suggestions({"affected_location": location})
         if suggestions:
             rows = [
@@ -121,6 +131,8 @@ def process_event(event: dict) -> bool:
                     "risk_reduction_percent": s["risk_reduction_percent"],
                     "confidence_score":       s["confidence_score"],
                     "recommendation_text":    s["recommendation_text"],
+                    # FIX: persist polyline waypoints into DB
+                    "polyline":               s.get("polyline", []),
                 }
                 for s in suggestions
             ]

@@ -297,7 +297,7 @@
   <script src="config.js"></script>
   <script>
     const BACKEND_URL = window.NEXUSFLOW_BACKEND || 'http://localhost:8001';
-    const COMPANY_ID = 'auroratea';
+    const COMPANY_ID  = 'auroratea';
     let judgeMode = false;
     let map, nodeMarkers = {}, routePolyline = null, graphNodes = [], graphEdges = [];
     let graphRender = null;
@@ -305,28 +305,61 @@
     const fmtInr = v => {
       v = parseInt(v || 0, 10);
       if (v >= 10000000) return `₹${(v/10000000).toFixed(1)}Cr`;
-      if (v >= 100000) return `₹${(v/100000).toFixed(1)}L`;
+      if (v >= 100000)   return `₹${(v/100000).toFixed(1)}L`;
       return `₹${v.toLocaleString()}`;
     };
-function extractBestPolyline(alert){
-  const options = alert?.decision_card?.options || [];
-  for (const opt of options) {
-    if (Array.isArray(opt.polyline) && opt.polyline.length) return opt.polyline;
-  }
-  const reroutes = alert?.rerouting_suggestions || [];
-  for (const opt of reroutes) {
-    if (Array.isArray(opt.polyline) && opt.polyline.length) return opt.polyline;
-  }
-  return null;
-}
+
+    // ── FIX: extractBestPolyline now checks ALL possible shapes the backend
+    //    can return, in priority order:
+    //    1. decision_card.options — built in-memory, always has polylines when
+    //       backend is alive. Skips "Wait & Monitor" (polyline is empty []).
+    //    2. rerouting_suggestions — persisted in DB, now includes polyline
+    //       after the schema + insert fix.
+    //    Returns the first non-empty polyline array found, or null.
+    function extractBestPolyline(alert) {
+      // Priority 1: decision_card options (in-memory, most reliable)
+      const dcOptions = alert?.decision_card?.options || [];
+      for (const opt of dcOptions) {
+        if (Array.isArray(opt.polyline) && opt.polyline.length >= 2) {
+          return opt.polyline;
+        }
+      }
+      // Priority 2: rerouting_suggestions from DB (now has polyline column)
+      const dbRoutes = alert?.rerouting_suggestions || [];
+      for (const opt of dbRoutes) {
+        if (Array.isArray(opt.polyline) && opt.polyline.length >= 2) {
+          return opt.polyline;
+        }
+      }
+      return null;
+    }
+
+    // ── FIX: find the recommended option across decision_card or rerouting_suggestions.
+    //    Returns the option object with recommended:true, or the first rerouting
+    //    option, or null. Used to auto-highlight + auto-draw on load.
+    function extractRecommendedOption(alert) {
+      const dcOptions = alert?.decision_card?.options || [];
+      const recommended = dcOptions.find(o => o.recommended === true);
+      if (recommended && Array.isArray(recommended.polyline) && recommended.polyline.length >= 2) {
+        return recommended;
+      }
+      // Fallback: first decision_card option with a polyline
+      const first = dcOptions.find(o => Array.isArray(o.polyline) && o.polyline.length >= 2);
+      if (first) return first;
+      // Fallback: first DB rerouting suggestion with a polyline
+      const dbRoutes = alert?.rerouting_suggestions || [];
+      const dbFirst  = dbRoutes.find(o => Array.isArray(o.polyline) && o.polyline.length >= 2);
+      return dbFirst || null;
+    }
+
     const riskColor = s => s >= 0.6 ? '#dc2626' : s >= 0.3 ? '#d97706' : '#16a34a';
 
     const timeAgo = ts => {
-      const d = new Date(ts), s = Math.floor((Date.now()-d)/1000);
+      const d = new Date(ts), s = Math.floor((Date.now() - d) / 1000);
       if (Number.isNaN(s)) return 'now';
-      if (s < 60) return `${s}s ago`;
-      if (s < 3600) return `${Math.floor(s/60)}m ago`;
-      return `${Math.floor(s/3600)}h ago`;
+      if (s < 60)   return `${s}s ago`;
+      if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+      return `${Math.floor(s / 3600)}h ago`;
     };
 
     const escapeHtml = (value) => String(value ?? '')
@@ -336,14 +369,14 @@ function extractBestPolyline(alert){
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
 
-    function api(path, opts={}) {
+    function api(path, opts = {}) {
       return fetch(BACKEND_URL + path, {
-        headers:{'Content-Type':'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         ...opts
       }).then(r => r.ok ? r.json() : Promise.reject(r));
     }
 
-    function toggleMode(){
+    function toggleMode() {
       judgeMode = !judgeMode;
       document.getElementById('modeBtn').classList.toggle('active', judgeMode);
       document.getElementById('modeText').textContent = judgeMode ? 'Simple View' : 'Expert View';
@@ -362,137 +395,135 @@ function extractBestPolyline(alert){
       }
     }
 
-    function toggleTrigger(){
+    function toggleTrigger() {
       document.getElementById('triggerDrop').classList.toggle('open');
     }
 
-    function initMap(){
+    function initMap() {
       map = L.map('map', {
-        center:[20.5937,78.9629],
-        zoom:5,
-        zoomControl:true,
-        attributionControl:false
+        center: [20.5937, 78.9629],
+        zoom: 5,
+        zoomControl: true,
+        attributionControl: false
       });
-
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        maxZoom:19,
-        subdomains:'abcd'
+        maxZoom: 19,
+        subdomains: 'abcd'
       }).addTo(map);
     }
 
-    function createMarkerIcon(node){
-      const c = riskColor(node.risk_score || 0);
+    function createMarkerIcon(node) {
+      const c    = riskColor(node.risk_score || 0);
       const size = (node.risk_score || 0) >= 0.6 ? 16 : 12;
       return L.divIcon({
-        html:`<div style="width:${size}px;height:${size}px;background:${c};border:2px solid ${c};border-radius:50%;box-shadow:0 0 0 4px ${c}33"></div>`,
-        className:'',
-        iconSize:[size+8,size+8],
-        iconAnchor:[(size+8)/2,(size+8)/2]
+        html: `<div style="width:${size}px;height:${size}px;background:${c};border:2px solid ${c};border-radius:50%;box-shadow:0 0 0 4px ${c}33"></div>`,
+        className: '',
+        iconSize:   [size + 8, size + 8],
+        iconAnchor: [(size + 8) / 2, (size + 8) / 2]
       });
     }
 
-    function renderNodes(nodes){
+    function renderNodes(nodes) {
       graphNodes = nodes || [];
       Object.values(nodeMarkers).forEach(m => map.removeLayer(m));
       nodeMarkers = {};
       graphNodes.forEach(node => {
         if (node.lat == null || node.lng == null) return;
-        const m = L.marker([node.lat, node.lng], { icon:createMarkerIcon(node) }).addTo(map);
+        const m = L.marker([node.lat, node.lng], { icon: createMarkerIcon(node) }).addTo(map);
         m.bindPopup(`
           <div style="font-family:Barlow,sans-serif;min-width:180px">
             <div class="node-title">${escapeHtml(node.name || '')}</div>
             <div class="node-type">${escapeHtml(node.type || node.node_type || '')}</div>
-            <div class="node-row"><span style="color:var(--muted)">Risk Score</span><span style="color:${riskColor(node.risk_score || 0)}">${((node.risk_score||0)*100).toFixed(0)}%</span></div>
+            <div class="node-row"><span style="color:var(--muted)">Risk Score</span><span style="color:${riskColor(node.risk_score || 0)}">${((node.risk_score || 0) * 100).toFixed(0)}%</span></div>
             <div class="node-row"><span style="color:var(--muted)">Active Shipment</span><span>${fmtInr(node.active_shipment_value_inr || 0)}</span></div>
             <div class="node-row"><span style="color:var(--muted)">Exposure</span><span>${fmtInr(node.financial_exposure_inr || 0)}</span></div>
           </div>
-        `, { className:'nexus-popup' });
+        `, { className: 'nexus-popup' });
         nodeMarkers[node.id] = m;
       });
     }
 
-    function drawRoutePolyline(polyline){
-  if (routePolyline) {
-    map.removeLayer(routePolyline);
-    routePolyline = null;
-  }
+    function drawRoutePolyline(polyline) {
+      if (routePolyline) {
+        map.removeLayer(routePolyline);
+        routePolyline = null;
+      }
+      if (!polyline || !polyline.length || !map) return;
 
-  if (!polyline || !polyline.length || !map) return;
+      const latlngs = polyline
+        .map(p => [Number(p.lat), Number(p.lng)])
+        .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
 
-  const latlngs = polyline
-    .map(p => [Number(p.lat), Number(p.lng)])
-    .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+      if (!latlngs.length) return;
 
-  if (!latlngs.length) return;
+      routePolyline = L.polyline(latlngs, {
+        color:   '#f97316',
+        weight:  5,
+        opacity: 0.95
+      }).addTo(map);
 
-  routePolyline = L.polyline(latlngs, {
-    color:'#f97316',
-    weight:5,
-    opacity:0.95
-  }).addTo(map);
+      routePolyline.bringToFront();
 
-  routePolyline.bringToFront();
+      if (latlngs.length === 1) {
+        map.setView(latlngs[0], Math.max(map.getZoom(), 7));
+      } else {
+        map.fitBounds(latlngs, { padding: [50, 50] });
+      }
+    }
 
-  if (latlngs.length === 1) {
-    map.setView(latlngs[0], Math.max(map.getZoom(), 7));
-  } else {
-    map.fitBounds(latlngs, { padding: [50, 50] });
-  }
-}
-
-    function drawGraph(){
+    function drawGraph() {
       const canvas = document.getElementById('graphCanvas');
-      const wrap = document.getElementById('graphWrap');
+      const wrap   = document.getElementById('graphWrap');
       if (!canvas || !wrap || !graphNodes.length) return;
 
-      canvas.width = wrap.clientWidth;
+      canvas.width  = wrap.clientWidth;
       canvas.height = wrap.clientHeight;
 
       const ctx = canvas.getContext('2d');
       const W = canvas.width, H = canvas.height;
       const pos = {};
-      const n = graphNodes.length || 1;
+      const n   = graphNodes.length || 1;
 
-      graphNodes.forEach((node,i) => {
-        const a = (i/n) * Math.PI*2 - Math.PI/2;
-        const r = Math.min(W,H) * 0.28;
-        pos[node.id] = { x: W/2 + Math.cos(a)*r, y: H/2 + Math.sin(a)*r };
+      graphNodes.forEach((node, i) => {
+        const a   = (i / n) * Math.PI * 2 - Math.PI / 2;
+        const r   = Math.min(W, H) * 0.28;
+        pos[node.id] = { x: W / 2 + Math.cos(a) * r, y: H / 2 + Math.sin(a) * r };
       });
 
-      graphRender = function(highlightId=null){
-        ctx.clearRect(0,0,W,H);
+      graphRender = function (highlightId = null) {
+        ctx.clearRect(0, 0, W, H);
         (graphEdges || []).forEach(edge => {
           const s = pos[edge.source], t = pos[edge.target];
           if (!s || !t) return;
           ctx.beginPath();
-          ctx.moveTo(s.x,s.y);
-          ctx.lineTo(t.x,t.y);
+          ctx.moveTo(s.x, s.y);
+          ctx.lineTo(t.x, t.y);
           ctx.strokeStyle = '#1e2d45';
-          ctx.lineWidth = Math.max(1, Math.min(4, (edge.shipment_value_inr || 0) / 5000000));
+          ctx.lineWidth   = Math.max(1, Math.min(4, (edge.shipment_value_inr || 0) / 5000000));
           ctx.stroke();
         });
 
         graphNodes.forEach(node => {
           const p = pos[node.id];
           if (!p) return;
-          const c = riskColor(node.risk_score || 0);
+          const c    = riskColor(node.risk_score || 0);
           const size = Math.max(7, Math.min(18, (node.active_shipment_value_inr || 0) / 1000000));
-          if (highlightId === node.id){
+          if (highlightId === node.id) {
             ctx.beginPath();
-            ctx.arc(p.x,p.y,size+10,0,Math.PI*2);
+            ctx.arc(p.x, p.y, size + 10, 0, Math.PI * 2);
             ctx.fillStyle = c + '33';
             ctx.fill();
           }
           ctx.beginPath();
-          ctx.arc(p.x,p.y,size,0,Math.PI*2);
-          ctx.fillStyle = c;
+          ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+          ctx.fillStyle   = c;
           ctx.strokeStyle = '#2a4262';
-          ctx.lineWidth = 1;
+          ctx.lineWidth   = 1;
           ctx.fill();
           ctx.stroke();
-          ctx.fillStyle = '#eaf0f7';
-          ctx.font = '10px JetBrains Mono';
-          ctx.textAlign = 'center';
+          ctx.fillStyle  = '#eaf0f7';
+          ctx.font       = '10px JetBrains Mono';
+          ctx.textAlign  = 'center';
           ctx.fillText(node.name || '', p.x, p.y + size + 14);
         });
       };
@@ -500,9 +531,9 @@ function extractBestPolyline(alert){
       graphRender();
     }
 
-    async function animateCascade(path){
+    async function animateCascade(path) {
       if (!graphRender || !path || !path.length) return;
-      for (const id of path){
+      for (const id of path) {
         await new Promise(r => setTimeout(r, 430));
         graphRender(id);
       }
@@ -510,15 +541,15 @@ function extractBestPolyline(alert){
       graphRender(null);
     }
 
-    function showToast(message){
+    function showToast(message) {
       document.getElementById('toastBody').textContent = message;
       document.getElementById('toast').classList.add('show');
       setTimeout(() => document.getElementById('toast').classList.remove('show'), 3200);
     }
 
-    function handleRouteSelect(element){
+    function handleRouteSelect(element) {
       const polylineRaw = element.dataset.polyline || '[]';
-      const label = element.dataset.label || 'Route';
+      const label       = element.dataset.label    || 'Route';
 
       let polyline = [];
       try {
@@ -534,44 +565,64 @@ function extractBestPolyline(alert){
       showToast(`${label} selected. Route updated on map.`);
     }
 
-    function acceptRoute(btn, name){
+    function acceptRoute(btn, name) {
       document.querySelectorAll('.option-box').forEach(x => x.classList.remove('accepted-route'));
       if (btn) btn.classList.add('accepted-route');
       showToast(`${name} accepted. The route has been marked as preferred and the chain health will update after the reroute event.`);
     }
 
-    function buildCard(alert){
-      const sig = alert.signal_type || 'weather';
-      const sev = alert.severity || 1;
+    function buildCard(alert) {
+      const sig  = alert.signal_type || 'weather';
+      const sev  = alert.severity    || 1;
       const card = document.createElement('div');
-      card.className = `card ${sig} sev-${sev}`;
+      card.className    = `card ${sig} sev-${sev}`;
       card.dataset.alertId = alert.id;
 
-      const suggestions = (alert.decision_card && alert.decision_card.options) || alert.rerouting_suggestions || [];
-      const reroute = suggestions.filter(s => s.label !== 'Wait & Monitor');
-      const wait = suggestions.find(s => s.label === 'Wait & Monitor' || s.warning);
+      // ── FIX: read options from decision_card (preferred) which now includes
+      //    polyline + recommended flag, then fall back to rerouting_suggestions.
+      const dcOptions   = alert?.decision_card?.options || [];
+      const suggestions = dcOptions.length
+        ? dcOptions
+        : (alert.rerouting_suggestions || []);
+
+      const reroute = suggestions.filter(s => s.label !== 'Wait & Monitor' && !s.warning);
+      const wait    = suggestions.find(s  => s.label === 'Wait & Monitor'  || s.warning);
 
       let rerouteHtml = '';
-      if (reroute.length){
+      if (reroute.length) {
         rerouteHtml += `<div style="padding:10px 12px;border-top:1px solid var(--line)">
           <div class="smallk" style="margin-bottom:8px">Rerouting Options</div>`;
 
         reroute.forEach((o, i) => {
-          const recommended = !!o.recommended;
-          const label = o.label || o.route_name || `Route ${i+1}`;
-          const polyline = encodeURIComponent(JSON.stringify(o.polyline || []));
-          const etaValue = o.eta || o.delta_hours || o.time_delta_hours || '—';
-          const savingsValue = o.savings_formatted || o.saves_formatted || fmtInr(o.savings_inr || o.saves_inr || 0);
-          const confidenceValue = o.confidence || o.confidence_score || 0;
+          // ── FIX: recommended flag now set by decision_card.py on first option.
+          //    This pre-applies accepted-route CSS so the best route is visually
+          //    highlighted immediately on load without requiring a click.
+          const isRecommended = !!o.recommended;
+          const label         = o.label || o.route_name || o.alternative_route || `Route ${i + 1}`;
+          const polyline      = encodeURIComponent(JSON.stringify(o.polyline || []));
+
+          // Support all ETA field name variants the backend may send
+          const etaValue = o.eta
+            || (o.time_delta_hours != null ? `+${o.time_delta_hours}h` : null)
+            || o.delta_hours
+            || '—';
+
+          // Support all savings field name variants
+          const savingsValue = o.saves_formatted
+            || o.savings_formatted
+            || o.cost_delta_formatted
+            || fmtInr(o.saves_inr || o.savings_inr || o.cost_delta_inr || 0);
+
+          const confidenceValue = o.confidence_score || o.confidence || 0;
 
           rerouteHtml += `
-            <div class="option-box ${recommended ? 'accepted-route' : ''}"
+            <div class="option-box ${isRecommended ? 'accepted-route' : ''}"
                  data-label="${escapeHtml(label)}"
                  data-polyline="${polyline}">
-              <div class="option-name">${escapeHtml(label)}</div>
+              <div class="option-name">${escapeHtml(label)}${isRecommended ? ' <span style="color:var(--green);font-size:10px;font-family:JetBrains Mono,monospace;letter-spacing:1px">★ RECOMMENDED</span>' : ''}</div>
               <div class="option-stats">
-                <div>ETA <span>${escapeHtml(etaValue)}</span></div>
-                <div class="save">Savings <span>${escapeHtml(savingsValue)}</span></div>
+                <div>ETA <span>${escapeHtml(String(etaValue))}</span></div>
+                <div class="save">Savings <span>${escapeHtml(String(savingsValue))}</span></div>
                 <div>Confidence <span>${Math.round(Number(confidenceValue) * 100)}%</span></div>
               </div>
             </div>`;
@@ -580,24 +631,32 @@ function extractBestPolyline(alert){
         rerouteHtml += `</div>`;
       }
 
-      if (wait){
+      if (wait) {
         rerouteHtml += `<div style="padding:10px 12px;border-top:1px solid var(--line)">
           <div class="option-box" style="border-color:rgba(220,38,38,.25);background:rgba(220,38,38,.08)">
             <div class="option-name" style="color:var(--red)">Wait & Monitor</div>
-            <div class="option-stats"><div>Delay <span>${escapeHtml(wait.delay || wait.time_delta_hours || '—')}</span></div></div>
+            <div class="option-stats"><div>Delay <span>${escapeHtml(String(wait.delay || wait.time_delta_hours || '—'))}</span></div></div>
           </div>
         </div>`;
       }
 
-      const peerText = alert.peer_intel || alert.peer_intelligence || '';
-      const confidenceText = alert.confidence_reason || '';
-      const locationText = alert.location || alert.affected_location || alert.title || 'Unknown';
+      const peerText       = alert.peer_intel
+                          || alert.peer_intelligence
+                          || alert?.decision_card?.peer_intelligence
+                          || '';
+      const confidenceText = alert.confidence_reason
+                          || alert?.decision_card?.confidence_reason
+                          || '';
+      const locationText   = alert.location
+                          || alert.affected_location
+                          || alert.title
+                          || 'Unknown';
 
       card.innerHTML = `
         <div class="head">
-          <div class="sig">${({weather:'🌧', port_congestion:'⚓', news:'📰', geopolitical:'🌍'})[sig] || '⚠'}</div>
+          <div class="sig">${({ weather: '🌧', port_congestion: '⚓', news: '📰', geopolitical: '🌍' })[sig] || '⚠'}</div>
           <div style="min-width:0;flex:1">
-            <div class="type ${sig}">${escapeHtml(sig.replace(/_/g,' '))}</div>
+            <div class="type ${sig}">${escapeHtml(sig.replace(/_/g, ' '))}</div>
             <div class="place">${escapeHtml(locationText)}</div>
             <div class="time">${timeAgo(alert.created_at || new Date().toISOString())}</div>
           </div>
@@ -612,50 +671,54 @@ function extractBestPolyline(alert){
           <div><div class="k">Impact</div><div class="v amber">${fmtInr(alert.impact_inr || alert.estimated_loss_inr || 0)}</div></div>
         </div>
         <div class="body">${escapeHtml(alert.summary || alert.description || alert.message || 'Supply chain signal detected.')}</div>
-        ${peerText ? `<div class="peer ${judgeMode ? 'show' : ''}"><div class="smallk">Peer Intelligence</div><div>${escapeHtml(peerText)}</div></div>` : ''}
+        ${peerText       ? `<div class="peer ${judgeMode ? 'show' : ''}"><div class="smallk">Peer Intelligence</div><div>${escapeHtml(peerText)}</div></div>` : ''}
         ${confidenceText ? `<div class="confidence ${judgeMode ? 'show' : ''}"><div class="smallk">Confidence</div><div>${escapeHtml(confidenceText)}</div></div>` : ''}
         ${rerouteHtml}
       `;
 
-      card.querySelectorAll('.option-box[data-polyline]').forEach((box) => {
+      // Attach click → draw route on map for every option box with a polyline
+      card.querySelectorAll('.option-box[data-polyline]').forEach(box => {
         box.addEventListener('click', () => handleRouteSelect(box));
       });
 
       return card;
     }
 
-    async function loadSummary(){
-      try{
+    async function loadSummary() {
+      try {
         const data = await api(`/api/dashboard/summary?company_id=${COMPANY_ID}`);
-        document.getElementById('valAlerts').textContent = data.active_alerts ?? data.count ?? '0';
-        document.getElementById('valExposure').textContent = fmtInr(data.exposure_at_risk_inr ?? data.total_exposure_inr ?? 0);
-        document.getElementById('valHealth').textContent = `${data.health_score ?? data.resilience_score ?? 0}`;
+        document.getElementById('valAlerts').textContent  = data.active_alerts   ?? data.count          ?? '0';
+        document.getElementById('valExposure').textContent = fmtInr(data.total_exposure_inr ?? data.exposure_at_risk_inr ?? 0);
+        document.getElementById('valHealth').textContent  = `${data.resilience_score ?? data.health_score ?? 0}`;
         document.getElementById('valRerouted').textContent = data.routes_rerouted ?? data.rerouted_routes ?? 0;
-      }catch(e){
-        document.getElementById('valAlerts').textContent = '3';
+      } catch (e) {
+        document.getElementById('valAlerts').textContent  = '3';
         document.getElementById('valExposure').textContent = '₹2.3Cr';
-        document.getElementById('valHealth').textContent = '84';
+        document.getElementById('valHealth').textContent  = '84';
         document.getElementById('valRerouted').textContent = '2';
       }
     }
 
-    async function loadAlerts(){
+    async function loadAlerts() {
       const feed = document.getElementById('feed');
       feed.innerHTML = '';
 
-      try{
-        const data = await api(`/api/alerts/active?company_id=${COMPANY_ID}`);
+      try {
+        const data   = await api(`/api/alerts/active?company_id=${COMPANY_ID}`);
+        // ── FIX: backend returns { company_id, count, alerts: [...] }.
+        //    Previously code tried data.alerts but also fell back to Array.isArray(data)
+        //    which was fine, but now explicit to be safe.
         const alerts = Array.isArray(data) ? data : (data.alerts || []);
 
-        if (!alerts.length){
+        if (!alerts.length) {
           feed.innerHTML = document.getElementById('emptyState').outerHTML;
-          if (routePolyline) {
-            map.removeLayer(routePolyline);
-            routePolyline = null;
-          }
+          if (routePolyline) { map.removeLayer(routePolyline); routePolyline = null; }
           return;
         }
 
+        // ── FIX: pick the lead alert as the first one that has any polyline,
+        //    not just any alert. This ensures the map always draws something
+        //    meaningful rather than clearing the route on load.
         const lead = alerts.find(a => extractBestPolyline(a)) || alerts[0];
 
         alerts.forEach(a => feed.appendChild(buildCard(a)));
@@ -663,125 +726,238 @@ function extractBestPolyline(alert){
         await new Promise(requestAnimationFrame);
         if (map) map.invalidateSize();
 
-        const bestPolyline = extractBestPolyline(lead);
-        if (bestPolyline) {
-          drawRoutePolyline(bestPolyline);
-        } else if (routePolyline) {
-          map.removeLayer(routePolyline);
-          routePolyline = null;
+        // ── FIX: draw the recommended option's polyline (orange route) on load.
+        //    extractRecommendedOption finds the recommended:true option first,
+        //    then falls back to the first option with any polyline.
+        const recommendedOpt = extractRecommendedOption(lead);
+        if (recommendedOpt && Array.isArray(recommendedOpt.polyline) && recommendedOpt.polyline.length >= 2) {
+          drawRoutePolyline(recommendedOpt.polyline);
+          // Also visually pre-select the matching option-box in the DOM
+          const label = recommendedOpt.label || recommendedOpt.alternative_route || '';
+          if (label) {
+            document.querySelectorAll('.option-box').forEach(box => {
+              if (box.dataset.label === label) box.classList.add('accepted-route');
+            });
+          }
+        } else {
+          const fallbackPolyline = extractBestPolyline(lead);
+          if (fallbackPolyline) drawRoutePolyline(fallbackPolyline);
+          else if (routePolyline) { map.removeLayer(routePolyline); routePolyline = null; }
         }
 
         if (lead?.cascade_path?.length) {
           animateCascade(lead.cascade_path.slice());
         }
-      }catch(e){
-        console.error("loadAlerts failed:", e);
+
+      } catch (e) {
+        console.error('loadAlerts failed:', e);
+
+        // ── FIX: demo fallback now includes a properly structured decision_card
+        //    with polylines and recommended:true on the first option, so the map
+        //    draws the orange route even when the Render backend is cold/down.
+        const JNPT_POLYLINE_MUNDRA = [
+          { lat: 21.1702, lng: 72.8311 },
+          { lat: 22.8442, lng: 69.6982 }
+        ];
+        const JNPT_POLYLINE_CHENNAI = [
+          { lat: 21.1702, lng: 72.8311 },
+          { lat: 13.0827, lng: 80.2707 }
+        ];
+
         const demo = [
           {
-            id:'1',
-            signal_type:'weather',
-            location:'JNPT Port Cluster',
-            severity:4,
-            exposure_inr:12300000,
-            impact_inr:6200000,
-            summary:'Cyclone warning can delay gate-in and port movement.',
-            created_at:new Date().toISOString(),
-            confidence_reason:'Weather model overlap across IMD + wind forecast.',
-            peer_intel:'14 peers already rerouted via Mundra.'
+            id:          '1',
+            signal_type: 'weather',
+            location:    'JNPT Port Cluster',
+            affected_location: 'JNPT',
+            severity:    4,
+            total_financial_exposure_inr: 12300000,
+            exposure_inr:  12300000,
+            impact_inr:    6200000,
+            summary:       'Cyclone warning can delay gate-in and port movement. AuroraTex cargo at high risk.',
+            created_at:    new Date().toISOString(),
+            confidence_reason: 'Cyclone warning (95%) + JNPT vessel count down 40% vs baseline (88%) + 3 news articles in last 2 hours (70%)',
+            peer_intelligence: '14 similar exporters already rerouted via Mundra in the last 4 hours. Average saving: ₹1.8 Cr each.',
+            cascade_path: [],
+            decision_card: {
+              options: [
+                {
+                  id:                     1,
+                  label:                  'Via Mundra Port (GPWL)',
+                  eta:                    '+36h',
+                  time_delta_hours:       36,
+                  saves_formatted:        '₹1.0Cr',
+                  savings_formatted:      '₹1.0Cr',
+                  confidence_score:       0.91,
+                  recommended:            true,          // FIX: auto-highlight + auto-draw
+                  polyline:               JNPT_POLYLINE_MUNDRA
+                },
+                {
+                  id:                     2,
+                  label:                  'Via Chennai Port (INNSA)',
+                  eta:                    '+72h',
+                  time_delta_hours:       72,
+                  saves_formatted:        '₹1.17Cr',
+                  savings_formatted:      '₹1.17Cr',
+                  confidence_score:       0.87,
+                  recommended:            false,
+                  polyline:               JNPT_POLYLINE_CHENNAI
+                },
+                {
+                  id:                     3,
+                  label:                  'Wait & Monitor',
+                  eta:                    '—',
+                  time_delta_hours:       0,
+                  saves_formatted:        '₹0',
+                  savings_formatted:      '₹0',
+                  confidence_score:       1.0,
+                  recommended:            false,
+                  warning:                'Full ₹1.23Cr still at risk',
+                  polyline:               []
+                }
+              ]
+            }
           },
           {
-            id:'2',
-            signal_type:'news',
-            location:'Mumbai Dispatch Corridor',
-            severity:3,
-            exposure_inr:7400000,
-            impact_inr:2100000,
-            summary:'Local disruption may affect outbound schedules.',
-            created_at:new Date().toISOString()
-          },
+            id:          '2',
+            signal_type: 'news',
+            location:    'Mumbai Dispatch Corridor',
+            affected_location: 'Mumbai',
+            severity:    3,
+            total_financial_exposure_inr: 7400000,
+            exposure_inr:  7400000,
+            impact_inr:    2100000,
+            summary:       'Local disruption may affect outbound schedules.',
+            created_at:    new Date().toISOString(),
+            decision_card: {
+              options: [
+                {
+                  id:             1,
+                  label:          'Via Mundra Port (GPWL)',
+                  eta:            '+36h',
+                  time_delta_hours: 36,
+                  saves_formatted: '₹60.7L',
+                  savings_formatted: '₹60.7L',
+                  confidence_score: 0.91,
+                  recommended:    true,
+                  polyline:       JNPT_POLYLINE_MUNDRA
+                },
+                {
+                  id:             2,
+                  label:          'Wait & Monitor',
+                  eta:            '—',
+                  time_delta_hours: 0,
+                  saves_formatted: '₹0',
+                  savings_formatted: '₹0',
+                  confidence_score: 1.0,
+                  recommended:    false,
+                  warning:        'Full ₹74L still at risk',
+                  polyline:       []
+                }
+              ]
+            }
+          }
         ];
+
         demo.forEach(a => feed.appendChild(buildCard(a)));
+
+        // Draw the recommended route from the first demo alert
+        const lead = demo[0];
+        const recommendedOpt = extractRecommendedOption(lead);
+        if (recommendedOpt) {
+          drawRoutePolyline(recommendedOpt.polyline);
+        }
       }
     }
 
-    async function loadWeather(){
-      try{
+    async function loadWeather() {
+      try {
         const w = await api(`/api/weather/mumbai`);
-        document.getElementById('wTemp').textContent = `${w.temp_c ?? w.temperature_c ?? 31}°C`;
-        document.getElementById('wDesc').textContent = w.description || 'scattered clouds';
-        document.getElementById('wWind').textContent = `${w.wind_kmh ?? 28} km/h`;
-        document.getElementById('wHumidity').textContent = `${w.humidity_pct ?? 74}%`;
-        document.getElementById('wFeels').textContent = `${w.feels_like_c ?? 36}°C`;
-        document.getElementById('wRain').textContent = `${w.rain_mm ?? w.rain_3h_mm ?? 0}mm`;
-      }catch(e){}
+        document.getElementById('wTemp').textContent     = `${w.temp_c        ?? w.temperature_c ?? 31}°C`;
+        document.getElementById('wDesc').textContent     =  w.description     || 'scattered clouds';
+        document.getElementById('wWind').textContent     = `${w.wind_kmh      ?? 28} km/h`;
+        document.getElementById('wHumidity').textContent = `${w.humidity_pct  ?? 74}%`;
+        document.getElementById('wFeels').textContent    = `${w.feels_like_c  ?? 36}°C`;
+        document.getElementById('wRain').textContent     = `${w.rain_mm       ?? w.rain_3h_mm ?? 0}mm`;
+      } catch (e) {}
     }
 
-    async function loadTimeline(){
+    async function loadTimeline() {
       const list = document.getElementById('timeline');
       list.innerHTML = '';
-      try{
-        const data = await api(`/api/disruptions/history?company_id=${COMPANY_ID}`);
+      try {
+        const data  = await api(`/api/disruptions/history?company_id=${COMPANY_ID}`);
         const items = Array.isArray(data) ? data : (data.items || data.events || []);
         items.slice(0, 8).forEach(x => {
           const el = document.createElement('div');
-          el.className = 'tl';
-          el.innerHTML = `
-            <div class="tl-top"><div class="tl-type">${escapeHtml((x.signal_type || 'event').replace(/_/g,' '))}</div><div class="tl-time">${timeAgo(x.created_at || new Date().toISOString())}</div></div>
+          el.className  = 'tl';
+          el.innerHTML  = `
+            <div class="tl-top">
+              <div class="tl-type">${escapeHtml((x.signal_type || 'event').replace(/_/g, ' '))}</div>
+              <div class="tl-time">${timeAgo(x.created_at || new Date().toISOString())}</div>
+            </div>
             <div class="tl-desc">${escapeHtml(x.description || x.summary || 'Network event recorded.')}</div>`;
           list.appendChild(el);
         });
-      }catch(e){
+      } catch (e) {
         list.innerHTML = '<div class="tl"><div class="tl-top"><div class="tl-type">demo</div><div class="tl-time">now</div></div><div class="tl-desc">Trigger a scenario to populate the timeline.</div></div>';
       }
     }
 
-    async function triggerScenario(scenario){
+    async function triggerScenario(scenario) {
       const status = document.getElementById('status');
-      const text = document.getElementById('statusText');
+      const text   = document.getElementById('statusText');
       status.classList.add('show');
       text.textContent = 'Firing signal…';
-      try{
-        await api(`/api/trigger/${scenario}`, { method:'POST' });
+      try {
+        await api(`/api/trigger/${scenario}`, { method: 'POST' });
         text.textContent = 'Signal sent. Waiting for cascade…';
         await new Promise(r => setTimeout(r, 900));
         await loadSummary();
         await loadAlerts();
         await loadTimeline();
         status.classList.remove('show');
-      }catch(e){
+      } catch (e) {
         text.textContent = 'Demo signal failed — using local fallback.';
-        status.classList.remove('show');
+        setTimeout(() => status.classList.remove('show'), 2000);
       }
     }
 
-    async function bootstrap(){
+    async function bootstrap() {
       initMap();
       await Promise.all([loadSummary(), loadAlerts()]);
-      try{
+      try {
         const nodes = await api('/api/graph/auroratea');
         renderNodes(nodes.nodes || nodes || []);
         graphEdges = nodes.edges || nodes.links || [];
-      }catch(e){
+      } catch (e) {
         renderNodes([
-          {id:'mumbai',name:'Mumbai',lat:19.076,lng:72.8777,risk_score:.35,active_shipment_value_inr:5500000,financial_exposure_inr:1200000},
-          {id:'jnpt',name:'JNPT',lat:18.946,lng:72.946, risk_score:.72,active_shipment_value_inr:8200000,financial_exposure_inr:3300000},
-          {id:'mundra',name:'Mundra',lat:22.839,lng:69.721, risk_score:.16,active_shipment_value_inr:4600000,financial_exposure_inr:700000},
-          {id:'delhi',name:'Delhi',lat:28.6139,lng:77.2090, risk_score:.12,active_shipment_value_inr:6100000,financial_exposure_inr:900000}
+          { id: 'mumbai',   name: 'Mumbai',   lat: 19.076,   lng: 72.8777, risk_score: .35, active_shipment_value_inr: 5500000, financial_exposure_inr: 1200000 },
+          { id: 'jnpt',     name: 'JNPT',     lat: 18.946,   lng: 72.946,  risk_score: .72, active_shipment_value_inr: 8200000, financial_exposure_inr: 3300000 },
+          { id: 'mundra',   name: 'Mundra',   lat: 22.839,   lng: 69.721,  risk_score: .16, active_shipment_value_inr: 4600000, financial_exposure_inr:  700000 },
+          { id: 'delhi',    name: 'Delhi',    lat: 28.6139,  lng: 77.2090, risk_score: .12, active_shipment_value_inr: 6100000, financial_exposure_inr:  900000 },
+          { id: 'chennai',  name: 'Chennai',  lat: 13.0827,  lng: 80.2707, risk_score: .10, active_shipment_value_inr: 3800000, financial_exposure_inr:  400000 },
+          { id: 'rotterdam',name: 'Rotterdam',lat: 51.9225,  lng:  4.4792, risk_score: .16, active_shipment_value_inr: 9000000, financial_exposure_inr: 1440000 }
         ]);
         graphEdges = [
-          {source:'mumbai',target:'jnpt',shipment_value_inr:5200000},
-          {source:'jnpt',target:'mundra',shipment_value_inr:3100000},
-          {source:'mumbai',target:'delhi',shipment_value_inr:2700000}
+          { source: 'mumbai',    target: 'jnpt',      shipment_value_inr: 5200000 },
+          { source: 'jnpt',      target: 'mundra',    shipment_value_inr: 3100000 },
+          { source: 'mumbai',    target: 'delhi',     shipment_value_inr: 2700000 },
+          { source: 'jnpt',      target: 'rotterdam', shipment_value_inr: 8200000 },
+          { source: 'jnpt',      target: 'chennai',   shipment_value_inr: 1900000 }
         ];
       }
       drawGraph();
-      window.addEventListener('resize', () => { map && map.invalidateSize(); if (judgeMode) drawGraph(); });
+      window.addEventListener('resize', () => {
+        map && map.invalidateSize();
+        if (judgeMode) drawGraph();
+      });
     }
 
-    window.toggleMode = toggleMode;
-    window.toggleTrigger = toggleTrigger;
-    window.triggerScenario = triggerScenario;
-    window.acceptRoute = acceptRoute;
+    window.toggleMode       = toggleMode;
+    window.toggleTrigger    = toggleTrigger;
+    window.triggerScenario  = triggerScenario;
+    window.acceptRoute      = acceptRoute;
     window.handleRouteSelect = handleRouteSelect;
 
     bootstrap();

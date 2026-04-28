@@ -11,6 +11,10 @@ Start:
 
 Swagger UI:
     http://localhost:8001/docs
+
+FIX v2.1:
+  - _process_event_sync now includes "polyline" in every rerouting_suggestions
+    row it inserts, matching the fix applied to poller.py and graph_router.py.
 """
 
 import asyncio
@@ -184,6 +188,8 @@ def _process_event_sync(event: dict) -> bool:
                     "risk_reduction_percent": s["risk_reduction_percent"],
                     "confidence_score":       s["confidence_score"],
                     "recommendation_text":    s["recommendation_text"],
+                    # FIX: persist polyline so frontend map can draw rerouting line
+                    "polyline":               s.get("polyline", []),
                 }
                 for s in suggestions
             ]
@@ -260,7 +266,7 @@ app = FastAPI(
         "**Person B endpoints** — graph, cascade, alerts, dashboard, rerouting\n\n"
         "Demo company: AuroraTex Industries (Surat textile exporter)"
     ),
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -295,7 +301,7 @@ def health():
     """Quick ping — confirms both engines are alive."""
     return {
         "status":             "ok",
-        "service":            "NexusFlow Unified API v2.0",
+        "service":            "NexusFlow Unified API v2.1",
         "demo_mode":          DEMO_MODE,
         "timestamp":          datetime.now(timezone.utc).isoformat(),
         "scheduler_running":  scheduler.running,
